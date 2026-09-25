@@ -22,7 +22,14 @@ export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onRe
   }, []);
 
   const abort = useCallback(() => {
-    recRef.current?.abort();
+    const rec = recRef.current;
+    if (rec) {
+      // Detach first so a cancelled recording can never deliver a late result.
+      rec.onresult = null;
+      rec.onend = null;
+      rec.onerror = null;
+    }
+    rec?.abort();
     setListening(false);
     setInterim('');
   }, []);

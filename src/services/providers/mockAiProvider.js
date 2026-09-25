@@ -144,29 +144,48 @@ export const mockAiProvider = {
    */
   async analyzePronunciation({ target, alternatives = [] }) {
     await wait(400);
-    const t = target.toLowerCase().replace(/[^a-z' ]/g, '').trim();
-    const heard = alternatives.map((a) => ({ ...a, clean: a.transcript.toLowerCase().replace(/[^a-z' ]/g, '').trim() }));
-    const exactIndex = heard.findIndex((h) => h.clean === t || h.clean.split(' ').includes(t));
+    const clean = (x) => x.toLowerCase().replace(/[^a-z' ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const compact = (x) => x.replace(/[\s']/g, '');
+    const t = clean(target);
+    const targetWords = t.split(' ');
+    const isPhrase = targetWords.length > 1;
+    const heard = alternatives.map((a) => ({ ...a, clean: clean(a.transcript) }));
+    // Exact match, ignoring spacing ("seashells" = "sea shells") — or the word inside a longer transcript.
+    const exactIndex = heard.findIndex((h) => compact(h.clean) === compact(t) || (!isPhrase && h.clean.split(' ').includes(t)));
     let score;
     let matched = false;
+    let missing = [];
     if (exactIndex === 0) {
       matched = true;
       score = Math.round(72 + (heard[0].confidence || 0.8) * 26);
     } else if (exactIndex > 0) {
       matched = true;
       score = Math.round(58 + (heard[exactIndex].confidence || 0.6) * 14);
+    } else if (isPhrase && heard.length) {
+      // Phrases / tongue twisters: credit for each target word that was recognised.
+      const results = heard.map((h) => {
+        const said = h.clean.split(' ');
+        const miss = targetWords.filter((w) => !said.includes(w));
+        return { ratio: (targetWords.length - miss.length) / targetWords.length, miss };
+      });
+      const best = results.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+      missing = best.miss;
+      score = Math.round(25 + best.ratio * 55);
     } else {
       const best = Math.max(0, ...heard.map((h) => similarity(h.clean, t)));
       score = Math.round(20 + best * 45);
     }
     score = clamp(score, 10, 98);
+    const thing = isPhrase ? 'phrase' : 'word';
     const feedback =
-      score >= 85
-        ? 'Great! Your word was recognised clearly.'
-        : score >= 65
-          ? 'Good — the word was recognised, but not with full confidence. Listen to the slow version and try again.'
-          : `The recogniser heard “${heard[0]?.transcript || 'nothing'}”. Listen carefully, slow down, and focus on the key sound.`;
-    return { score, matched, heard: heard[0]?.transcript || '', alternatives: heard.map((h) => h.transcript), feedback, method: 'speech-recognition-estimate', demo: true };
+      missing.length && missing.length < targetWords.length
+        ? `Nearly there! These words weren’t recognised: “${missing.join('”, “')}”. Slow down and say each one clearly.`
+        : score >= 85
+          ? `Great! Your ${thing} was recognised clearly.`
+          : score >= 65
+            ? `Good — the ${thing} was recognised, but not with full confidence. Listen to the slow version and try again.`
+            : `The recogniser heard “${heard[0]?.transcript || 'nothing'}”. Listen carefully, slow down, and focus on the key sound.`;
+    return { score, matched, missing, heard: heard[0]?.transcript || '', alternatives: heard.map((h) => h.transcript), feedback, method: 'speech-recognition-estimate', demo: true };
   },
 
   async analyzeGrammar({ topicTitle, results }) {
