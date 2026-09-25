@@ -11,7 +11,7 @@ import ChatBubble from '../components/speaking/ChatBubble.jsx';
 import MicButton, { SoundBars } from '../components/speaking/MicButton.jsx';
 import SessionSetup from '../components/speaking/SessionSetup.jsx';
 import { useApp } from '../context/AppContext.jsx';
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition.js';
+import { useLongSpeechRecognition } from '../hooks/useLongSpeechRecognition.js';
 import { useTextToSpeech } from '../hooks/useTextToSpeech.js';
 import { useTimer } from '../hooks/useTimer.js';
 import { aiService } from '../services/aiService.js';
@@ -20,10 +20,13 @@ import { teacherService } from '../services/teacherService.js';
 import { getMode, CONVERSATION_MODES } from '../data/conversationModes.js';
 import { formatClock } from '../utils/date.js';
 
+const SILENCE_MS = 4000; // auto-send after this much silence
+const INITIAL_SILENCE_MS = 8000; // thinking time before the first word
+
 const STATUS_TEXT = {
   thinking: 'Emma is thinking…',
   speaking: 'Emma is speaking…',
-  listening: 'Listening… tap ■ when you finish',
+  listening: 'Listening… pause for 4s or tap ■ to send',
   idle: 'Your turn — tap the mic to speak',
 };
 
@@ -52,9 +55,22 @@ export default function Speaking() {
   const autoSpeak = settings.autoSpeak && tts.supported;
 
   const handleUserTurn = useRef(null);
-  const recognition = useSpeechRecognition({
-    onResult: ({ transcript, confidence, spokenMs }) => handleUserTurn.current?.(transcript, { viaVoice: true, confidence, spokenMs }),
+  // Keeps listening through short pauses; sends automatically after 4 s of silence
+  // (or when the learner taps stop). Before the first word there's more time to think.
+  const recognition = useLongSpeechRecognition({
+    silenceMs: SILENCE_MS,
+    initialSilenceMs: INITIAL_SILENCE_MS,
+    maxSeconds: 180,
+    onResult: ({ transcript, confidence, spokenMs }) => {
+      if (!transcript) {
+        setNotice({ tone: 'info', text: recognitionErrorMessage('no-speech') });
+        return;
+      }
+      handleUserTurn.current?.(transcript, { viaVoice: true, confidence, spokenMs });
+    },
   });
+  const interim = recognition.listening ? recognition.liveText : '';
+  const sendingIn = recognition.listening && recognition.quietMs >= 1500 ? Math.max(1, Math.ceil((SILENCE_MS - recognition.quietMs) / 1000)) : null;
 
   // Recognition errors → friendly message; fall back to typing when the mic can't work.
   useEffect(() => {
@@ -72,7 +88,7 @@ export default function Speaking() {
 
   useEffect(() => {
     listRef.current?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, recognition.interim]);
+  }, [messages, interim]);
 
   useEffect(() => () => tts.cancel(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -253,7 +269,7 @@ export default function Speaking() {
         {messages.map((m, i) => (
           <ChatBubble key={i} message={m} onReplay={tts.supported ? (t) => tts.speak(t) : undefined} />
         ))}
-        {recognition.interim && <ChatBubble message={{ role: 'user', text: recognition.interim }} interim />}
+        {interim && <ChatBubble message={{ role: 'user', text: interim }} interim />}
         {status === 'thinking' && (
           <li className="flex items-center gap-2 text-sm text-slate-500"><span className="flex gap-1" aria-hidden="true">{[0, 1, 2].map((d) => <span key={d} className="size-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: `${d * 0.15}s` }} />)}</span><span className="sr-only">Emma is typing</span></li>
         )}
@@ -270,7 +286,9 @@ export default function Speaking() {
             <div className="flex flex-col items-center gap-1">
               <MicButton listening={recognition.listening} disabled={status === 'thinking'} onClick={toggleMic} />
               <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                {recognition.listening ? <><span className="size-2 animate-pulse rounded-full bg-rose-500" aria-hidden="true" />Recording</> : 'Tap to speak'}
+                {recognition.listening ? (
+                  sendingIn ? <>Sending in {sendingIn}s… keep talking to continue</> : <><span className="size-2 animate-pulse rounded-full bg-rose-500" aria-hidden="true" />Recording — tap ■ to send</>
+                ) : recognition.status === 'processing' ? 'Sending…' : 'Tap to speak'}
               </span>
             </div>
             <Button variant="outline" size="md" icon={PhoneOff} onClick={() => setConfirmEnd(true)} className="text-rose-600 dark:text-rose-400">
