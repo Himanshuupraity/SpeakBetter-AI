@@ -48,6 +48,8 @@ export default function Speaking() {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [seconds] = useTimer(phase === 'active');
   const listRef = useRef(null);
+  const endRef = useRef(null);
+  const controlsRef = useRef(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -86,9 +88,24 @@ export default function Speaking() {
     else setStatus((s) => (s === 'listening' ? 'idle' : s));
   }, [recognition.listening]);
 
+  // Keep the newest message (and your live transcript) visible just above the
+  // pinned mic controls — scrolling it to the bottom edge would hide it behind them.
+  const scrollToLatest = useCallback((behavior = 'smooth') => {
+    const end = endRef.current;
+    const controls = controlsRef.current;
+    if (!end || !controls) return;
+    const overlap = end.getBoundingClientRect().bottom - controls.getBoundingClientRect().top + 16;
+    if (overlap > 0) window.scrollBy({ top: overlap, behavior });
+  }, []);
+
   useEffect(() => {
-    listRef.current?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, interim]);
+    scrollToLatest('smooth');
+  }, [messages, status, scrollToLatest]);
+
+  // While you speak, follow the growing text instantly (smooth scrolling on every word is jumpy).
+  useEffect(() => {
+    if (interim) scrollToLatest('auto');
+  }, [interim, notice, scrollToLatest]);
 
   useEffect(() => () => tts.cancel(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -274,9 +291,10 @@ export default function Speaking() {
           <li className="flex items-center gap-2 text-sm text-slate-500"><span className="flex gap-1" aria-hidden="true">{[0, 1, 2].map((d) => <span key={d} className="size-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: `${d * 0.15}s` }} />)}</span><span className="sr-only">Emma is typing</span></li>
         )}
       </ol>
+      <div ref={endRef} aria-hidden="true" />
 
       {/* Controls */}
-      <div className="sticky bottom-16 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-4 backdrop-blur sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8 dark:border-slate-800 dark:bg-slate-900/95">
+      <div ref={controlsRef} className="sticky bottom-16 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-4 backdrop-blur sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8 dark:border-slate-800 dark:bg-slate-900/95">
         {notice && <Alert tone={notice.tone} className="mb-3" onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
         {inputMode === 'voice' ? (
           <div className="flex items-center justify-between gap-3">
