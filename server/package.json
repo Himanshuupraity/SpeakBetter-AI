@@ -1,0 +1,14 @@
+{
+  "name": "speakbetter-ai-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Optional backend that connects SpeakBetter AI to Claude. Holds the API key server-side.",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "zod": "^4.6.5"
+  }
+}

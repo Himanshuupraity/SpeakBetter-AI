@@ -1,0 +1,79 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-300: #a5b4fc;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.05);
+  --animate-pulse-ring: pulse-ring 1.6s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+  --animate-fade-in: fade-in 0.25s ease-out;
+  --animate-bar: bar 1s ease-in-out infinite;
+
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.55; }
+    100% { transform: scale(1.7); opacity: 0; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes bar {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    /* Native controls (select, checkbox, scrollbars, audio player) follow the theme. */
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100;
+    overflow-x: hidden;
+  }
+  /* Let grid items shrink on small screens instead of overflowing sideways. */
+  .grid > * {
+    min-width: 0;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+  button, [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.perspective { perspective: 1000px; }
+.backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.rotate-y-180 { transform: rotateY(180deg); }
+.preserve-3d { transform-style: preserve-3d; }
