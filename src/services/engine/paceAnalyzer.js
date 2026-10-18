@@ -30,7 +30,11 @@ const VERDICTS = {
   perfect: { label: 'Perfect pace', headline: 'Perfect pace! 🎯' },
   fast: { label: 'A little fast', headline: 'A little fast — slow down slightly' },
   'too-fast': { label: 'Too fast', headline: 'You’re speaking too fast' },
+  insufficient: { label: 'Not enough speech', headline: 'Not enough speech to measure' },
 };
+
+// Below this much measured speech, a words-per-minute figure is noise (2 words in 0.1 s ≠ 1200 wpm).
+const MIN_SPEECH_MS = 2000;
 
 const TIPS = {
   slow: [
@@ -44,6 +48,11 @@ const TIPS = {
     'Slow down on important words, numbers and names — stress them clearly.',
     'Take a small breath before each new idea.',
     'Use the pace guide in “Read aloud” to feel the right rhythm.',
+  ],
+  insufficient: [
+    'Speak for at least 10–15 seconds so we can measure your speed.',
+    'Check that your microphone is on and close to you.',
+    'Start speaking right after you press record, and keep going until you stop it.',
   ],
   perfect: [
     'Great — use this same pace in meetings and interviews.',
@@ -85,15 +94,19 @@ export function analyzePace({ transcript = '', samples = [], durationMs, knownWo
   const timerMode = !recognised && Boolean(knownWordCount);
   const words = timerMode ? knownWordCount : recognised;
 
-  const spoken = samples.filter((s) => s.words > 0);
-  let speakingMs = durationMs;
+  const totalMs = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
+  const spoken = (samples || []).filter((s) => s.words > 0 && Number.isFinite(s.t));
+  let speakingMs = totalMs;
   let firstT = 0;
-  let lastT = durationMs;
+  let lastT = totalMs;
   if (!timerMode && spoken.length >= 2) {
     // Recognition reports the first word ~0.3–0.6 s after it was spoken, so allow for that.
     firstT = Math.max(0, spoken[0].t - 400);
     lastT = spoken[spoken.length - 1].t + 200;
-    speakingMs = Math.max(1000, lastT - firstT);
+    speakingMs = lastT - firstT;
+  }
+  if (!words || !(speakingMs >= MIN_SPEECH_MS)) {
+    return notEnoughSpeech({ context, words, speakingMs, totalMs, transcript, timerMode });
   }
   const wpm = Math.round(words / (speakingMs / 60000));
 
@@ -152,7 +165,7 @@ export function analyzePace({ transcript = '', samples = [], durationMs, knownWo
     wpm,
     words,
     speakingSec: Math.round(speakingMs / 1000),
-    totalSec: Math.round(durationMs / 1000),
+    totalSec: Math.round(totalMs / 1000),
     pauseSec: Math.round(pauseMs / 1000),
     longPauses,
     timeline,
@@ -163,6 +176,35 @@ export function analyzePace({ transcript = '', samples = [], durationMs, knownWo
     message,
     tips: tips.slice(0, 4),
     score,
+    range: context.range,
+    context: context.id,
+    contextLabel: context.label,
+    transcript,
+    method: timerMode ? 'timer' : 'speech-recognition',
+  };
+}
+
+/** Same shape as a normal result, so every screen can show it — but no fake pace or score. */
+function notEnoughSpeech({ context, words, speakingMs, totalMs, transcript, timerMode }) {
+  const [lo, hi] = context.range;
+  return {
+    wpm: 0,
+    words,
+    speakingSec: Math.round(Math.max(0, speakingMs || 0) / 1000),
+    totalSec: Math.round(totalMs / 1000),
+    pauseSec: 0,
+    longPauses: 0,
+    timeline: [],
+    consistency: null,
+    verdict: 'insufficient',
+    insufficient: true,
+    verdictLabel: VERDICTS.insufficient.label,
+    headline: VERDICTS.insufficient.headline,
+    message: words
+      ? `We heard ${words} word${words === 1 ? '' : 's'}, but not for long enough to measure your speed. Speak for at least 10–15 seconds and aim for ${lo}–${hi} words per minute.`
+      : `We didn’t hear any speech. Speak for at least 10–15 seconds and aim for ${lo}–${hi} words per minute.`,
+    tips: [...TIPS.insufficient],
+    score: 0,
     range: context.range,
     context: context.id,
     contextLabel: context.label,

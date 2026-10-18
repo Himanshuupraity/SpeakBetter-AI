@@ -42,6 +42,13 @@ export default function SpeakingSpeed() {
   const [timerRunning, setTimerRunning] = useState(false);
   const [guideMs, setGuideMs] = useState(0);
   const timerStart = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const passage = SPEED_PASSAGES[passageIdx];
   const passageWords = useMemo(() => passage.text.split(/\s+/), [passage]);
@@ -68,14 +75,23 @@ export default function SpeakingSpeed() {
     if (speech.error === 'audio-capture' && recordVoice) setRecordVoice(false);
   }, [speech.error, recordVoice]);
 
+  // Recognition ended by itself (time limit, error) — stop the voice recording with it.
+  useEffect(() => {
+    if (!speech.listening) recorder.stop();
+  }, [speech.listening]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (speech.error) recorder.stop();
+  }, [speech.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const finish = (raw) => {
     const result = analyzePace({ ...raw, knownWordCount: mode === 'read' ? countWords(passage.text) : undefined }, contextId);
-    if (result.words < MIN_WORDS) {
-      setNotice(`We only heard ${result.words} words. Speak for at least 10–15 seconds (about ${MIN_WORDS}+ words) so we can measure your speed.`);
+    const heard = Number.isFinite(result?.words) ? result.words : 0;
+    if (!result || result.verdict === 'insufficient' || !Number.isFinite(result.wpm) || result.wpm <= 0 || heard < MIN_WORDS) {
+      setNotice(`We only heard ${heard} ${heard === 1 ? 'word' : 'words'}. Speak for at least 10–15 seconds (about ${MIN_WORDS}+ words) so we can measure your speed.`);
       return;
     }
     setAnalysis(result);
-    const [lo, hi] = result.range;
+    const [lo, hi] = Array.isArray(result.range) ? result.range : context.range;
     recordSession({
       type: 'speed',
       title: mode === 'read' ? `Read aloud: ${passage.title}` : 'Free speaking',
@@ -91,7 +107,7 @@ export default function SpeakingSpeed() {
               category: 'pace',
               said: result.verdict.includes('slow') ? 'Speaking too slowly' : 'Speaking too fast',
               correct: `Aim for ${lo}–${hi} words per minute (you spoke at ${result.wpm})`,
-              why: result.tips[0],
+              why: result.tips?.[0] || `Practise speaking at ${lo}–${hi} words per minute.`,
               practice: null,
               topic: null,
             }],
@@ -112,8 +128,14 @@ export default function SpeakingSpeed() {
       setTimerRunning(true);
       return;
     }
-    if (recordVoice && recorder.supported) await recorder.start();
-    speech.start();
+    if (recordVoice && recorder.supported) {
+      await recorder.start();
+      if (!mountedRef.current) {
+        recorder.stop();
+        return;
+      }
+    }
+    if (!speech.start()) recorder.stop();
   };
 
   const stopRecording = () => {
@@ -144,7 +166,7 @@ export default function SpeakingSpeed() {
   const guideIndex = paceGuide && recording ? Math.floor((guideMs / 60000) * targetWpm) : -1;
 
   const history = state.sessions
-    .filter((s) => s.type === 'speed' && s.details?.result)
+    .filter((s) => s.type === 'speed' && Number.isFinite(s.details?.result?.wpm) && s.details.result.wpm > 0)
     .slice(0, 10)
     .reverse()
     .map((s, i) => ({ label: `#${i + 1}`, key: s.id, value: s.details.result.wpm }));
@@ -254,7 +276,11 @@ export default function SpeakingSpeed() {
             )}
             {speech.listening && speech.liveText && <p className="mt-3 line-clamp-3 text-left text-sm text-slate-500 italic">“{speech.liveText}”</p>}
             {useTimerMode && <p className="mt-3 text-xs text-slate-500">Speech recognition isn’t available here, so we time your reading and use the passage’s word count.</p>}
-            {speech.error && <Alert tone="warning" className="mt-3 text-left">{recognitionErrorMessage(speech.error)}</Alert>}
+            {speech.error ? (
+              <Alert tone="warning" className="mt-3 text-left">{recognitionErrorMessage(speech.error)}</Alert>
+            ) : recorder.error && recordVoice && !useTimerMode ? (
+              <Alert tone="warning" className="mt-3 text-left">{recorder.errorMessage || recognitionErrorMessage(recorder.error)}</Alert>
+            ) : null}
             {notice && <Alert tone="info" className="mt-3 text-left" onDismiss={() => setNotice(null)}>{notice}</Alert>}
             <p className="mt-3 text-xs text-slate-500">Maximum {MAX_SECONDS / 60} minutes per attempt.</p>
           </Card>

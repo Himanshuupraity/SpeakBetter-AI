@@ -48,14 +48,24 @@ export function categoryLabel(id) {
   return MISTAKE_CATEGORIES[id]?.label || id;
 }
 
-const PAST_MARKER = /\b(yesterday|last\s+(night|week|month|year|weekend|time|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\w+\s+(days?|weeks?|months?|years?|hours?)\s+ago|ago|in\s+(19|20)\d\d)\b/i;
+const PAST_MARKER = /\b(yesterday|last\s+(night|week|month|year|weekend|time|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\w+\s+(days?|weeks?|months?|years?|hours?)\s+ago|ago)\b/i;
 const SOFT_PAST_MARKER = /\b(today|this\s+morning|this\s+week|earlier)\b/i;
+// "since last week", "for the past two years" — a starting point / unfinished period, which goes WITH the present perfect.
+const UNFINISHED_PERIOD = /\bsince\s+(?:yesterday|last\s+\w+|\w+\s+\w+\s+ago)\b|\b(?:for|in|over|during|within)\s+the\s+(?:last|past)\s+(?:\w+\s+)?\w+\b/gi;
+// Talking about now ("…and now I work at Infosys") — verbs after this are present, not past.
+const PRESENT_MARKER = /\b(now|currently|nowadays|these\s+days|at\s+present|at\s+the\s+moment|still|every\s+day|usually)\b/i;
+
+/** "in 2019" is past, "in 2030" is not. */
+function mentionsPastYear(sentence) {
+  return [...sentence.matchAll(/\bin\s+((?:19|20)\d\d)\b/gi)].some((m) => Number(m[1]) < new Date().getFullYear());
+}
 
 /** Is the sentence clearly about the past? "today" counts only if another past verb is present. */
 function isPastContext(sentence) {
-  if (PAST_MARKER.test(sentence)) return true;
-  if (SOFT_PAST_MARKER.test(sentence)) {
-    return (sentence.match(/[a-z']+/gi) || []).some((w) => isPastForm(w) && !['read', 'put', 'cut', 'let', 'hit'].includes(w.toLowerCase()));
+  const s = sentence.replace(UNFINISHED_PERIOD, ' ');
+  if (PAST_MARKER.test(s) || mentionsPastYear(s)) return true;
+  if (SOFT_PAST_MARKER.test(s)) {
+    return (s.match(/[a-z']+/gi) || []).some((w) => isPastForm(w) && !['read', 'put', 'cut', 'let', 'hit'].includes(w.toLowerCase()));
   }
   return false;
 }
@@ -67,25 +77,54 @@ function keepCase(original, replacement) {
   return replacement;
 }
 
+/**
+ * Optional def.skip(match, ...groups, offset, string) -> true leaves that match alone
+ * (for checks a regex can't express, e.g. "is the next word a noun?").
+ */
 function regexRule(def) {
+  const accept = (args) => !def.skip || !def.skip(...args);
+  const all = new RegExp(def.pattern.source, def.pattern.flags.includes('g') ? def.pattern.flags : `${def.pattern.flags}g`);
   return {
     ...def,
     test: (s) => {
-      def.pattern.lastIndex = 0;
-      return def.pattern.test(s);
+      if (!def.skip) {
+        def.pattern.lastIndex = 0;
+        return def.pattern.test(s);
+      }
+      return [...s.matchAll(all)].some((m) => accept([...m, m.index, s]));
     },
     fix: (s) => s.replace(def.pattern, (...args) => {
       const match = args[0];
+      if (!accept(args)) return match;
       const out = typeof def.replace === 'function' ? def.replace(...args) : match.replace(new RegExp(def.pattern.source, 'i'), def.replace);
       return keepCase(match, out);
     }),
   };
 }
 
+/** Does this word look like a plural noun that the previous noun is describing ("project MANAGERS")? */
+function isPluralHead(word) {
+  return /^[a-z]+s$/.test(word) && !/(ss|us|is)$/.test(word) && !NOT_A_HEAD_NOUN.has(word);
+}
+
+/** Next word after a match (lowercased), or '' at the end of the sentence. */
+function nextWord(str, end) {
+  return (str.slice(end).match(/^[\s-]+([a-z']+)/i)?.[1] || '').toLowerCase();
+}
+
+// Words that can follow a noun without making it a compound ("one of my friend IS…").
+const NOT_A_HEAD_NOUN = new Set(['is', 'was', 'has', 'does', 'as', 'us', 'this', 'always', 'across', 'plus', 'unless', 'thus', 'yes', 'perhaps', 'sometimes']);
+
+const OFFICE_COMPOUND = /^[\s-]+(?:supplies|space|work|hours|building|chair|desk|party|politics|staff|equipment|furniture|job|admin|manager|boy|timings?|premises|culture|bearer)\b/i;
+
 const SUBJECT = '(I|we|they|you|he|she|it|my\\s+(?:manager|friend|boss|team|colleague|brother|sister|mother|father|wife|husband|lead)|the\\s+team|everyone)';
 const ADVERB = '(?:(?:also|just|then|really|finally|again|first|only|actually)\\s+)?';
 
 const DURATION = '(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|many|several|few|a\\s+few)\\s+(?:years?|months?|weeks?|days?|hours?|minutes?)';
+
+// "since it is late" means "because" — not a starting point in time.
+const SINCE_BECAUSE = "(?:it|he|she|they|we|you|i|there|my|our|his|her|their|your|a|an|everyone|nobody|someone|this\\s+is|that\\s+is)\\b";
+const TRIP_VERBS = new Set(['going', 'coming', 'leaving', 'travelling', 'traveling', 'flying', 'heading', 'visiting', 'moving', 'returning', 'staying']);
 
 const PAST_SUBJECT_BE = { i: 'was', he: 'was', she: 'was', it: 'was', we: 'were', they: 'were', you: 'were' };
 const HAVE_BEEN = { 'i am': 'I have been', "i'm": "I've been", 'we are': 'we have been', "we're": "we've been", 'they are': 'they have been', "they're": "they've been", 'you are': 'you have been', "you're": "you've been", 'he is': 'he has been', "he's": "he's been", 'she is': 'she has been', "she's": "she's been" };
@@ -94,7 +133,7 @@ export const RULES = [
   regexRule({
     id: 'myself-intro',
     category: 'vocabulary',
-    pattern: /^myself\s+([A-Za-z]+)/i,
+    pattern: /^myself\s+(?!(?:and|or|too|also|alone|included|am|was|have|had|will)\b)([A-Za-z]+)/i, // not "Myself and my team…"
     replace: (_m, name) => `I'm ${name.charAt(0).toUpperCase()}${name.slice(1)}`,
     why: 'To introduce yourself, say "I\'m …" or "My name is …". "Myself …" is not used this way in natural English.',
     practice: { question: 'Introduce yourself: "___ Priya, and I work in QA."', answer: "I'm" },
@@ -103,6 +142,8 @@ export const RULES = [
     id: 'go-office',
     category: 'articles',
     pattern: /\b(go|goes|went|going|come|comes|came|coming|return|returned|get|got)\s+(?:to\s+)?office\b/gi,
+    // "get office supplies" — here "office" describes another noun.
+    skip: (m, _verb, offset, str) => OFFICE_COMPOUND.test(str.slice(offset + m.length)),
     replace: (_m, verb) => `${verb} to the office`,
     why: 'We say "go to the office" — "go" needs "to", and "office" needs the article "the" because it is a specific place.',
     practice: { question: 'I ___ office at 9 a.m. every day.', answer: 'go to the' },
@@ -126,7 +167,7 @@ export const RULES = [
   regexRule({
     id: 'to-home',
     category: 'prepositions',
-    pattern: /\b(go|goes|went|going|come|comes|came|coming|reach|reached|get|got|return|returned)\s+to\s+home\b/gi,
+    pattern: /\b(go|goes|went|going|come|comes|came|coming|reach|reached|get|got|return|returned)\s+to\s+home\b(?![\s-]+(?:page|screen|tab|button|loan|town|country|base|ground|office|team|delivery|care|decor|appliances|minister|ministry|run|feed)\b)(?!['’]s)/gi,
     replace: (_m, verb) => `${verb} home`,
     why: '"Home" works like an adverb after movement verbs, so we say "go home", not "go to home".',
     practice: { question: 'After work, I went ___.', answer: 'home' },
@@ -161,18 +202,25 @@ export const RULES = [
     why: 'You are talking about something that already happened, so use the past tense (e.g. "go" → "went", "complete" → "completed").',
     practice: { question: 'Yesterday I ___ (meet) my manager.', answer: 'met' },
     _re: new RegExp(`(?<!\\b(?:did|didn't|do|does|don't|will|would|can|could|should|to|not|never|thank|let)\\s+)\\b${SUBJECT}\\s+${ADVERB}([a-z]+)\\b`, 'gi'),
+    /** Only the part before "now / currently / these days…" is about the past. */
+    _pastPart(s) {
+      const at = s.search(PRESENT_MARKER);
+      return at === -1 ? s : s.slice(0, at);
+    },
     test(s) {
       if (!isPastContext(s)) return false;
+      const part = this._pastPart(s);
       this._re.lastIndex = 0;
       let m;
-      while ((m = this._re.exec(s))) {
+      while ((m = this._re.exec(part))) {
         const word = m[2].toLowerCase();
         if (['am', 'is', 'are'].includes(word) || baseOf(word)) return true;
       }
       return false;
     },
     fix(s) {
-      return s.replace(this._re, (full, subj, verb) => {
+      const part = this._pastPart(s);
+      return part.replace(this._re, (full, subj, verb) => {
         const lower = verb.toLowerCase();
         if (['am', 'is', 'are'].includes(lower)) {
           return full.replace(new RegExp(`\\b${verb}\\b`), PAST_SUBJECT_BE[subj.toLowerCase()] || (/^(we|they|you)$/i.test(subj) ? 'were' : 'was'));
@@ -180,7 +228,7 @@ export const RULES = [
         const base = baseOf(lower);
         if (!base) return full;
         return full.replace(new RegExp(`\\b${verb}\\b`), pastOf(base));
-      });
+      }) + s.slice(part.length);
     },
   },
   regexRule({
@@ -205,7 +253,7 @@ export const RULES = [
   regexRule({
     id: 'from-duration',
     category: 'prepositions',
-    pattern: new RegExp(`\\b(?:from|since)\\s+(${DURATION})\\b`, 'gi'),
+    pattern: new RegExp(`\\b(?:from|since)\\s+(${DURATION})\\b(?!\\s+(?:to|till|until|onwards?|ago|back|old|later|before|after|earlier)\\b)`, 'gi'), // not "from one day to another"
     replace: (_m, dur) => `for ${dur}`,
     why: 'Use "for" with a length of time (for 2 years). Use "since" only with a starting point (since 2022, since Monday).',
     practice: { question: 'I have lived here ___ five years.', answer: 'for' },
@@ -213,7 +261,9 @@ export const RULES = [
   regexRule({
     id: 'perfect-continuous',
     category: 'verb-tense',
-    pattern: new RegExp(`\\b(I am|I'm|we are|we're|they are|they're|you are|you're|he is|he's|she is|she's)\\s+([a-z]+ing)\\b(?=.*\\b(?:for\\s+${DURATION}|since\\s+\\w+))`, 'gi'),
+    pattern: new RegExp(`\\b(I am|I'm|we are|we're|they are|they're|you are|you're|he is|he's|she is|she's)\\s+([a-z]+ing)\\b(?=.*\\b(?:for\\s+${DURATION}|since\\s+(?!${SINCE_BECAUSE})\\w+))`, 'gi'),
+    // "I'm going to Goa for two days" is a plan, not an action that started in the past.
+    skip: (_m, _subj, verb, offset, str) => TRIP_VERBS.has(verb.toLowerCase()) && !new RegExp(`\\bsince\\s+(?!${SINCE_BECAUSE})\\w+`, 'i').test(str.slice(offset)),
     replace: (_m, subj, verb) => `${HAVE_BEEN[subj.toLowerCase()]} ${verb}`,
     why: 'For an action that started in the past and is still continuing, use the present perfect continuous: "I have been working here for 2 years."',
     practice: { question: 'She ___ (work) here since 2021.', answer: 'has been working' },
@@ -221,7 +271,7 @@ export const RULES = [
   regexRule({
     id: 'third-person-s',
     category: 'subject-verb',
-    pattern: /(?<!\b(?:did|does|do|will|would|can|could|should|shall|may|might|must|to|let|make|makes|made|help|helps|watch|see|saw|hear|heard)\s+)\b(he|she|it|my\s+(?:manager|friend|boss|team|brother|sister|father|mother|colleague|wife|husband|son|daughter)|everyone|everybody|someone|somebody|nobody)\s+(always\s+|usually\s+|often\s+|never\s+|sometimes\s+|also\s+|really\s+)?(go|do|have|work|like|want|need|make|take|come|say|know|live|play|watch|study|teach|get|try|use|think|help|write|speak|eat|drink|leave|call|check|test|manage|handle|lead|love|enjoy|travel|start|finish)\b/gi,
+    pattern: /(?<!\b(?:did|does|do|didn['’]t|doesn['’]t|don['’]t|has|have|had|hasn['’]t|haven['’]t|hadn['’]t|will|won['’]t|would|wouldn['’]t|can|can['’]t|cannot|could|couldn['’]t|should|shouldn['’]t|shall|may|might|must|mustn['’]t|to|let|make|makes|made|help|helps|watch|see|saw|hear|heard)\s+)\b(he|she|it|my\s+(?:manager|friend|boss|team|brother|sister|father|mother|colleague|wife|husband|son|daughter)|everyone|everybody|someone|somebody|nobody)\s+(always\s+|usually\s+|often\s+|never\s+|sometimes\s+|also\s+|really\s+)?(go|do|have|work|like|want|need|make|take|come|say|know|live|play|watch|study|teach|get|try|use|think|help|write|speak|eat|drink|leave|call|check|test|manage|handle|lead|love|enjoy|travel|start|finish)\b/gi,
     replace: (_m, subj, adv, verb) => `${subj} ${adv || ''}${thirdPerson(verb.toLowerCase())}`,
     why: 'For he / she / it (and one person or thing) in the present simple, add -s or -es to the verb: "he goes", "she works", "it has".',
     practice: { question: 'She ___ (go) to work every morning.', answer: 'goes' },
@@ -230,6 +280,8 @@ export const RULES = [
     id: 'many-uncountable',
     category: 'plural-singular',
     pattern: /\bmany\s+(work|information|advice|furniture|equipment|homework|feedback|knowledge|luggage|baggage|money|traffic|research|stuff|software)\b/gi,
+    // "many software engineers", "many research papers" — the noun describes a plural noun.
+    skip: (m, _noun, offset, str) => isPluralHead(nextWord(str, offset + m.length)),
     replace: (_m, noun) => `a lot of ${noun}`,
     why: 'This noun is uncountable, so we don\'t use "many" with it. Use "a lot of" or "much" instead: "a lot of work".',
     practice: { question: 'I have ___ work today. (many / a lot of)', answer: 'a lot of' },
@@ -237,8 +289,9 @@ export const RULES = [
   regexRule({
     id: 'uncountable-plural',
     category: 'plural-singular',
-    pattern: /\b(informations|advices|furnitures|equipments|homeworks|feedbacks|knowledges|luggages|softwares|researches|stuffs)\b/gi,
-    replace: (m) => m.slice(0, -1),
+    // "researches" / "stuffs" are also verbs ("she researches…"), so only after a determiner.
+    pattern: /\b(informations|advices|furnitures|equipments|homeworks|feedbacks|knowledges|luggages|softwares)\b|(?<=\b(?:the|some|any|my|your|our|his|her|their|these|those|many|several|all|of|more|few)\s+)(researches|stuffs)\b/gi,
+    replace: (m) => (/researches$/i.test(m) ? m.slice(0, -2) : m.slice(0, -1)),
     why: 'This noun is uncountable in English, so it has no plural "-s": "information", "feedback", "software".',
     practice: { question: 'Thanks for your ___ (feedback / feedbacks).', answer: 'feedback' },
   }),
@@ -253,8 +306,9 @@ export const RULES = [
   regexRule({
     id: 'explain-me',
     category: 'prepositions',
-    pattern: /\b(explain|explained|explains|explaining)\s+(me|him|her|us|them)\b/gi,
-    replace: (_m, v, obj) => `${v} to ${obj}`,
+    // Not "explain them to me" (them = the things), or "explained her decision" (her = possessive).
+    pattern: /\b(explain|explained|explains|explaining)\s+(?:(me|him|us)\b(?!\s+to\b)|(her|them)\b(?=\s*$|\s*[.,!?]|\s+(?:how|what|why|when|where|who|which|that|the|a|an|it|this|these|those|everything|something|about)\b))/gi,
+    replace: (_m, v, obj, objHerThem) => `${v} to ${obj || objHerThem}`,
     why: '"Explain" needs "to" before the person: "Can you explain it to me?" or "Can you explain to me how…"',
     practice: { question: 'Could you explain ___ me how this works?', answer: 'to' },
   }),
@@ -309,7 +363,7 @@ export const RULES = [
   regexRule({
     id: 'doubt-question',
     category: 'vocabulary',
-    pattern: /\b(a|one|some|few|a\s+few|many|two|three|small|any)\s+(doubts?)\b/gi,
+    pattern: /(?<!\b(?:beyond|without|no|shadow\s+of)\s+)\b(a|one|some|few|a\s+few|many|two|three|small|any)\s+(doubts?)\b/gi, // not "beyond a doubt"
     replace: (_m, q, d) => `${q} ${d.toLowerCase().endsWith('s') || q.toLowerCase() === 'any' ? 'questions' : 'question'}`,
     why: 'In most English, "doubt" means you think something may not be true. When you want to ask something, say "I have a question".',
     practice: { question: 'Excuse me, I have a ___ about the task.', answer: 'question' },
@@ -325,7 +379,7 @@ export const RULES = [
   regexRule({
     id: 'stative-having',
     category: 'verb-tense',
-    pattern: /\b(I am|I'm|we are|we're|they are|they're|you are|you're|he is|he's|she is|she's)\s+having\s+((?:a|an|some|one|two|three|many|no)\s+)?(question|questions|car|house|laptop|brother|brothers|sister|sisters|idea|knowledge|experience|bike|phone|pet|dog|cat)\b/gi,
+    pattern: /\b(I am|I'm|we are|we're|they are|they're|you are|you're|he is|he's|she is|she's)\s+having\s+((?:a|an|some|one|two|three|many|no)\s+)?(question|questions|car|house|laptop|brother|brothers|sister|sisters|idea|knowledge|experience|bike|phone|pet|dog|cat)\b(?![\s-]+(?:calls?|number|charger|screen|rides?|loan|meetings?|sessions?|food|walk|show)\b)/gi, // "having a phone call" is fine
     replace: (_m, subj, det, noun) => {
       const s = subj.toLowerCase().replace(/'m|'re|'s| am| are| is/g, '');
       const verb = ['he', 'she'].includes(s.trim()) ? 'has' : 'have';
@@ -362,15 +416,16 @@ export const RULES = [
   regexRule({
     id: 'missing-article-event',
     category: 'articles',
-    pattern: /\b(have|has|had|having|attend|attended|attending|join|joined|joining|in|scheduled|schedule)\s+(meeting|call|interview|presentation)\b/gi,
-    replace: (_m, v, noun) => `${v} a ${noun}`,
+    pattern: /\b(have|has|had|having|attend|attended|attending|join|joined|joining|in|scheduled|schedule)\s+(meeting|call|interview|presentation)\b(?![\s-]+(?:centre|center|notes?|rooms?|links?|invites?|invitations?|details|slots?|logs?|recordings?|agenda|minutes|experience|preparation|skills?|questions?|tips|panel|rounds?|process|letter|deck|slides?|summary|schedule|series|quality|volume|waiting)\b)/gi,
+    replace: (_m, v, noun) => `${v} ${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`,
     why: 'Singular countable nouns like "meeting" or "call" need an article: "I have a meeting", "I joined a call".',
     practice: { question: 'I have ___ meeting at 4 p.m.', answer: 'a' },
   }),
   regexRule({
     id: 'missing-article-role',
     category: 'articles',
-    pattern: /\b(with|to|from|by|for|ask|asked|tell|told|inform|informed|call|called)\s+(developer|manager|client|tester|customer|lead|team lead|HR|doctor|interviewer)\b/gi,
+    // "HR" works like a department name ("talk to HR"); "to lead the project" is the verb.
+    pattern: /\b(with|to|from|by|for|ask|asked|tell|told|inform|informed|call|called)\s+(developer|manager|client|tester|customer|team lead|lead(?![\s-]+(?:the|a|an|this|that|these|those|my|our|your|his|her|their|it|them|us|him|me|by|teams?|projects?|people|efforts?|initiatives?|discussions?|meetings?|sessions?|calls?)\b)|doctor|interviewer)\b/gi,
     replace: (_m, w, role) => `${w} the ${role}`,
     why: 'A singular job title like "developer" or "manager" needs an article. Use "the" when you mean a specific person: "I talked to the developer."',
     practice: { question: 'I will discuss it with ___ developer tomorrow.', answer: 'the' },
@@ -378,7 +433,8 @@ export const RULES = [
   regexRule({
     id: 'question-word-order',
     category: 'word-order',
-    pattern: /^(what|where|why|how|when|who)\s+(you|they|we|he|she|it)\s+(are|is|were|was|have|has|can|will|should|would|could)\b/i,
+    // "What you are saying is right." is a statement — the clause is the subject of a second verb.
+    pattern: /^(what|where|why|how|when|who)\s+(you|they|we|he|she|it)\s+(are|is|were|was|have|has|can|will|should|would|could)\b(?!.*\b(?:is|was|are|were|isn['’]t|wasn['’]t|seems|sounds|makes|means|matters|depends|looks)\b)/i,
     replace: (_m, wh, subj, aux) => `${wh} ${aux} ${subj}`,
     why: 'In questions, put the helping verb before the subject: "What are you doing?", not "What you are doing?"',
     practice: { question: 'Put in order: "you / where / are / going?"', answer: 'Where are you going?' },
@@ -386,8 +442,9 @@ export const RULES = [
   regexRule({
     id: 'one-of-plural',
     category: 'plural-singular',
-    pattern: /\bone\s+of\s+(my|the|our|his|her|their|your)\s+(friend|colleague|teammate|project|problem|task|brother|sister|client|customer|manager|reason|issue|bug|goal|hobby)\b(?!s)/gi,
-    replace: (_m, det, noun) => `one of ${det} ${noun === 'hobby' ? 'hobbies' : `${noun}s`}`,
+    pattern: /\bone\s+of\s+(my|the|our|his|her|their|your)\s+((?:best|closest|biggest|main|favourite|favorite|old|new|good|close|top)\s+)?(friend|colleague|teammate|project|problem|task|brother|sister|client|customer|manager|reason|issue|bug|goal|hobby)\b(?!s)/gi,
+    skip: (m, _det, _adj, _noun, offset, str) => isPluralHead(nextWord(str, offset + m.length)), // "one of the project managers"
+    replace: (_m, det, adj, noun) => `one of ${det} ${adj || ''}${noun.toLowerCase() === 'hobby' ? 'hobbies' : `${noun}s`}`,
     why: 'After "one of", use a plural noun: "one of my friends", "one of the issues".',
     practice: { question: 'She is one of my best ___ (friend).', answer: 'friends' },
   }),
@@ -402,7 +459,8 @@ export const RULES = [
   regexRule({
     id: 'there-is-plural',
     category: 'subject-verb',
-    pattern: /\bthere\s+(is|was)\s+(many|several|a\s+lot\s+of|lots\s+of|two|three|four|five|some|few)\s+([a-z]+s)\b/gi,
+    // "some news", "a lot of stress" end in -s but are not plurals.
+    pattern: /\bthere\s+(is|was)\s+(many|several|a\s+lot\s+of|lots\s+of|two|three|four|five|some|few)\s+(?!(?:news|series|species|means|physics|maths|mathematics|politics|economics|lens|always|this|thus)\b)([a-z]+s)(?<!ss|us|is)\b/gi,
     replace: (_m, v, q, noun) => `there ${v.toLowerCase() === 'is' ? 'are' : 'were'} ${q} ${noun}`,
     why: 'Use "there are / there were" with plural nouns: "There are many bugs."',
     practice: { question: 'There ___ three tickets in the backlog. (is / are)', answer: 'are' },
@@ -418,7 +476,8 @@ export const RULES = [
   regexRule({
     id: 'good-in',
     category: 'prepositions',
-    pattern: /\b(good|bad|better|excellent|great)\s+in\s+(english|maths|math|coding|testing|cooking|sports|communication|speaking|writing|programming|[a-z]+ing)\b/gi,
+    // "[a-z]+ing" is for skills (testing, cooking) — not nouns like "spring" or "the morning".
+    pattern: /\b(good|bad|better|excellent|great)\s+in\s+(english|maths|math|coding|testing|cooking|sports|communication|speaking|writing|programming|(?!(?:spring|string|ring|king|wing|thing|morning|evening|building|ceiling|wedding|pudding|clothing|meeting|setting|ending|beginning|painting|lighting|feeling|evening)\b)[a-z]+ing)\b/gi,
     replace: (_m, adj, skill) => `${adj} at ${skill}`,
     why: 'We are "good at" a skill or activity, not "good in": "She is good at testing."',
     practice: { question: 'I am good ___ problem-solving.', answer: 'at' },
@@ -426,7 +485,7 @@ export const RULES = [
   regexRule({
     id: 'at-morning',
     category: 'prepositions',
-    pattern: /\b(?:at|in)\s+(morning|evening|afternoon)\b/gi,
+    pattern: /\b(?:at|in)\s+(morning|evening|afternoon)\b(?![\s-]+(?:assembly|meetings?|stand-?ups?|shifts?|walks?|prayers?|sessions?|briefings?|class(?:es)?|news|shows?|tea|coffee|routine|runs?|slots?|batch)\b)/gi,
     replace: (_m, part) => `in the ${part}`,
     why: 'Use "in the" with parts of the day: "in the morning", "in the evening" (but "at night").',
     practice: { question: 'I usually exercise ___ morning.', answer: 'in the' },
@@ -434,7 +493,8 @@ export const RULES = [
   regexRule({
     id: 'in-night',
     category: 'prepositions',
-    pattern: /\b(?:in|on)\s+night\b/gi,
+    // Only on its own — "on night shifts", "in night mode" are fine.
+    pattern: /\b(?:in|on)\s+night\b(?![\s-]+(?!(?:and|but|so|or|i|we|he|she|they|you|it|because|after|before|too|also|then|when|while|time)\b)[a-z])/gi,
     replace: 'at night',
     why: 'We say "at night" (but "in the morning / afternoon / evening").',
     practice: { question: "I can't sleep ___ night.", answer: 'at' },
@@ -442,7 +502,8 @@ export const RULES = [
   regexRule({
     id: 'angry-on',
     category: 'prepositions',
-    pattern: /\b(angry|upset|mad)\s+on\b/gi,
+    // Only "angry on <person>" — "mad on the call" is about where it happened.
+    pattern: /\b(angry|upset|mad)\s+on\b(?=\s+(?:me|him|her|us|them|you|my|his|their|our|your|everyone|everybody|someone|people)\b)/gi,
     replace: (_m, adj) => `${adj} with`,
     why: 'You are angry or upset "with" a person (and "about" a situation), not "on".',
     practice: { question: 'My manager was upset ___ me.', answer: 'with' },
@@ -465,16 +526,30 @@ const COMMON_MISSPELLINGS = {
   thx: 'thanks', u: 'you', ur: 'your', r: 'are',
 };
 
+const TEXT_SPEAK = new Set(['u', 'ur', 'r']);
+
+/** Corrected spelling, or null. Text-speak ("u", "r") only as a lowercase word on its own — not "U.S." or "R&D". */
+function misspelling(w, offset, s) {
+  const fixed = COMMON_MISSPELLINGS[w.toLowerCase()];
+  if (!fixed || fixed === w.toLowerCase()) return null;
+  if (TEXT_SPEAK.has(w.toLowerCase())) {
+    const before = s[offset - 1] || ' ';
+    const after = s[offset + w.length] || ' ';
+    if (w !== w.toLowerCase() || /[.&'’\-/]/.test(before) || /[.&'’\-/]/.test(after) && !/^\.(\s|$)/.test(s.slice(offset + w.length))) return null;
+  }
+  return fixed;
+}
+
 export const WRITING_RULES = [
   {
     id: 'spelling',
     category: 'spelling',
     why: 'Spelling mistake — check the corrected word.',
     practice: { question: 'Spell correctly: "recieve"', answer: 'receive' },
-    test: (s) => (s.match(/[a-z]+/gi) || []).some((w) => COMMON_MISSPELLINGS[w.toLowerCase()] && COMMON_MISSPELLINGS[w.toLowerCase()] !== w.toLowerCase()),
-    fix: (s) => s.replace(/[a-z]+/gi, (w) => {
-      const fixed = COMMON_MISSPELLINGS[w.toLowerCase()];
-      return fixed && fixed !== w.toLowerCase() ? keepCase(w, fixed) : w;
+    test: (s) => s.replace(/[a-z]+/gi, (w, offset) => (misspelling(w, offset, s) ? '\u0000' : w)).includes('\u0000'),
+    fix: (s) => s.replace(/[a-z]+/gi, (w, offset) => {
+      const fixed = misspelling(w, offset, s);
+      return fixed ? keepCase(w, fixed) : w;
     }),
   },
   {

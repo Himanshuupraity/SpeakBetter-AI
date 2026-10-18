@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight, Headphones, Play, Square, Star } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader.jsx';
@@ -77,6 +77,9 @@ function Player({ item }) {
   const cast = tts.castFor(item.lines);
   const [result, setResult] = useState(null);
   const startedAt = useRef(Date.now());
+
+  // Stop the dialogue when leaving the page or switching to another item.
+  useEffect(() => () => tts.cancel(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const play = () => {
     if (tts.speaking) {

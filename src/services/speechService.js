@@ -26,9 +26,14 @@ export const speechService = {
     const voices = window.speechSynthesis.getVoices();
     if (voices.length) return Promise.resolve(voices);
     return new Promise((resolve) => {
-      const done = () => resolve(window.speechSynthesis.getVoices());
-      window.speechSynthesis.addEventListener('voiceschanged', done, { once: true });
-      setTimeout(done, 1500);
+      let timer = null;
+      const done = () => {
+        clearTimeout(timer);
+        window.speechSynthesis.removeEventListener('voiceschanged', done);
+        resolve(window.speechSynthesis.getVoices());
+      };
+      window.speechSynthesis.addEventListener('voiceschanged', done);
+      timer = setTimeout(done, 1500);
     });
   },
 

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Check, Lightbulb, X } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader.jsx';
@@ -33,6 +33,16 @@ export default function GrammarTopic() {
   const [comment, setComment] = useState(null);
   const [quizKey, setQuizKey] = useState(0);
   const startedAt = useRef(Date.now());
+  // Bumped whenever the attempt changes (retry, tab or topic switch, leaving), so a
+  // late AI comment for an earlier attempt is dropped instead of shown on the new one.
+  const attemptId = useRef(0);
+  useEffect(() => {
+    attemptId.current += 1;
+    setComment(null);
+    return () => {
+      attemptId.current += 1;
+    };
+  }, [topicId]);
 
   if (!topic) {
     return (
@@ -46,6 +56,7 @@ export default function GrammarTopic() {
   const setTab = (id) => {
     setParams(id === 'learn' ? {} : { mode: id }, { replace: true });
     startedAt.current = Date.now();
+    attemptId.current += 1;
     setComment(null);
   };
 
@@ -60,8 +71,13 @@ export default function GrammarTopic() {
       details: { topicId: topic.id, mode, correct: graded.correct, total: graded.total, results: graded.results },
       mistakes: quizMistakes(graded, { source: 'grammar', category, topic: topic.id }),
     });
-    const res = await aiService.analyzeGrammar({ topicTitle: topic.title, results: graded.results });
-    setComment(res.comment);
+    const id = attemptId.current;
+    try {
+      const res = await aiService.analyzeGrammar({ topicTitle: topic.title, results: graded.results });
+      if (id === attemptId.current) setComment(res?.comment ?? null);
+    } catch {
+      /* the comment is optional — the score is already shown */
+    }
   };
 
   const practiceQuestions = seededShuffle(topic.questions, `${topic.id}-${quizKey}`);
@@ -139,6 +155,7 @@ export default function GrammarTopic() {
             onComplete={(g) => onQuizComplete(g, tab)}
             onRetry={() => {
               setQuizKey((k) => k + 1);
+              attemptId.current += 1;
               setComment(null);
               startedAt.current = Date.now();
             }}

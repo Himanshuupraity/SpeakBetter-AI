@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { AudioLines, ChevronLeft, ChevronRight, Lightbulb, Play, Turtle, Volume2 } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader.jsx';
@@ -55,6 +56,10 @@ export default function Pronunciation() {
   const [selfCheck, setSelfCheck] = useState(null);
   const attempts = useRef([]);
   const startedAt = useRef(Date.now());
+  const mountedRef = useRef(true);
+  // Which word the current recording is for; bumped whenever the word changes so a
+  // late analysis can never be shown (or saved) against a different word.
+  const attemptRef = useRef({ id: 0, word: null });
 
   const tts = useTextToSpeech();
   const recorder = useAudioRecorder();
@@ -62,54 +67,85 @@ export default function Pronunciation() {
     maxAlternatives: 5,
     onResult: async ({ alternatives, transcript, confidence }) => {
       recorder.stop();
+      const { id, word: target } = attemptRef.current;
+      if (!target) return;
       setAnalyzing(true);
-      const res = await aiService.analyzePronunciation({ target: word.word, alternatives: alternatives.length ? alternatives : [{ transcript, confidence }] });
-      setAnalyzing(false);
-      setResult(res);
-      recordAttempt(res.score);
+      try {
+        const res = await aiService.analyzePronunciation({ target: target.word, alternatives: alternatives.length ? alternatives : [{ transcript, confidence }] });
+        if (!mountedRef.current || id !== attemptRef.current.id) return;
+        setResult(res);
+        recordAttempt(res.score, target);
+      } finally {
+        if (mountedRef.current && id === attemptRef.current.id) setAnalyzing(false);
+      }
     },
   });
 
-  function recordAttempt(score) {
-    attempts.current.push({ word: word.word, sound: word.sound, level: word.difficulty, score });
-    setSessionBest((b) => ({ ...b, [word.word]: Math.max(b[word.word] ?? 0, score) }));
+  function recordAttempt(score, target = word) {
+    attempts.current.push({ word: target.word, sound: target.sound, level: target.difficulty, score });
+    setSessionBest((b) => ({ ...b, [target.word]: Math.max(b[target.word] ?? 0, score) }));
   }
 
   useEffect(() => {
     if (!recognition.listening) recorder.stop();
   }, [recognition.listening]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A recognition error can end the attempt before it ever started listening — stop recording too.
+  useEffect(() => {
+    if (recognition.error) recorder.stop();
+  }, [recognition.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (recognition.error === 'audio-capture' && recordVoice) setRecordVoice(false);
   }, [recognition.error, recordVoice]);
 
-  // Save the practice automatically when leaving the page.
-  useEffect(
-    () => () => {
-      const list = attempts.current;
-      if (!list.length) return;
-      const avg = Math.round(average(list.map((a) => a.score)));
-      const weak = list.filter((a) => a.score < 60);
-      recordSession({
-        type: 'pronunciation',
-        title: `${[...new Set(list.map((a) => SOUNDS.find((s) => s.id === a.sound)?.label))].join(', ')} Sounds`,
-        durationSec: (Date.now() - startedAt.current) / 1000,
-        score: avg,
-        skills: { pronunciation: avg },
-        details: { attempts: list, method: 'speech-recognition-estimate' },
-      });
-      addMistakes(
-        weak.map((a) => {
-          const w = PRONUNCIATION_WORDS.find((x) => x.word === a.word);
-          return { source: 'pronunciation', category: 'pronunciation', sound: a.sound, said: `“${a.word}” was hard to recognise`, correct: `${a.word} ${w?.ipa || ''}`.trim(), why: `${w?.commonMistake || ''}. ${w?.tip || ''}`.trim(), practice: null, topic: null };
-        }),
-      );
-    },
-    [recordSession, addMistakes],
-  );
+  /** Save the attempts so far as a session (each attempt is saved exactly once). */
+  const saveAttempts = useCallback(() => {
+    const list = attempts.current;
+    if (!list.length) return;
+    attempts.current = [];
+    const avg = Math.round(average(list.map((a) => a.score)));
+    const weak = list.filter((a) => a.score < 60);
+    recordSession({
+      type: 'pronunciation',
+      title: `${[...new Set(list.map((a) => SOUNDS.find((s) => s.id === a.sound)?.label))].join(', ')} Sounds`,
+      durationSec: (Date.now() - startedAt.current) / 1000,
+      score: avg,
+      skills: { pronunciation: avg },
+      details: { attempts: list, method: 'speech-recognition-estimate' },
+    });
+    addMistakes(
+      weak.map((a) => {
+        const w = PRONUNCIATION_WORDS.find((x) => x.word === a.word);
+        return { source: 'pronunciation', category: 'pronunciation', sound: a.sound, said: `“${a.word}” was hard to recognise`, correct: `${a.word} ${w?.ipa || ''}`.trim(), why: `${w?.commonMistake || ''}. ${w?.tip || ''}`.trim(), practice: null, topic: null };
+      }),
+    );
+    startedAt.current = Date.now();
+  }, [recordSession, addMistakes]);
+  const saveRef = useRef(saveAttempts);
+  saveRef.current = saveAttempts;
+
+  // Save automatically when leaving the page — including closing the tab or switching
+  // away on mobile, where an unmount never happens. flushSync commits the save at once.
+  useEffect(() => {
+    mountedRef.current = true;
+    const flush = () => flushSync(() => saveRef.current());
+    const onVisibility = () => document.visibilityState === 'hidden' && flush();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      mountedRef.current = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+      saveRef.current();
+    };
+  }, []);
 
   const selectWord = (id) => {
+    attemptRef.current = { id: attemptRef.current.id + 1, word: null };
+    setAnalyzing(false);
     recognition.abort();
+    recorder.stop();
     setWordId(id);
     setResult(null);
     setSelfCheck(null);
@@ -149,8 +185,17 @@ export default function Pronunciation() {
     tts.cancel();
     setResult(null);
     setSelfCheck(null);
-    if (recordVoice && recorder.supported) await recorder.start();
-    recognition.start();
+    const id = attemptRef.current.id + 1;
+    attemptRef.current = { id, word };
+    if (recordVoice && recorder.supported) {
+      await recorder.start();
+      // Left the page or picked another word while the mic permission prompt was open.
+      if (!mountedRef.current || attemptRef.current.id !== id) {
+        recorder.stop();
+        return;
+      }
+    }
+    if (!recognition.start()) recorder.stop();
   };
 
   return (
@@ -165,7 +210,7 @@ export default function Pronunciation() {
         <div className="space-y-5">
           <Card className="text-center">
             <div className="flex items-center justify-between gap-2">
-              <button type="button" onClick={() => step(-1)} disabled={atStart} className="grid size-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800" aria-label="Previous word">
+              <button type="button" onClick={() => step(-1)} disabled={atStart || analyzing} className="grid size-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800" aria-label="Previous word">
                 <ChevronLeft className="size-5" />
               </button>
               <div className="flex flex-wrap items-center justify-center gap-1.5">
@@ -173,7 +218,7 @@ export default function Pronunciation() {
                 <span className="text-xs text-slate-500">{isPhrase ? 'Phrase' : 'Word'} {position + 1} of {words.length}</span>
                 {word.id === wordOfDay.id && <Badge tone="warning">Word of the day</Badge>}
               </div>
-              <button type="button" onClick={() => step(1)} disabled={atEnd} className="grid size-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800" aria-label="Next word">
+              <button type="button" onClick={() => step(1)} disabled={atEnd || analyzing} className="grid size-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800" aria-label="Next word">
                 <ChevronRight className="size-5" />
               </button>
             </div>
@@ -208,7 +253,11 @@ export default function Pronunciation() {
                   Speech recognition isn’t available in this browser, so automatic scoring is off. Listen to Emma, repeat the word out loud, then check yourself below.
                 </Alert>
               )}
-              {recognition.error && recognition.supported && <Alert tone="warning" className="mt-2 text-left">{recognitionErrorMessage(recognition.error)}</Alert>}
+              {recognition.error && recognition.supported ? (
+                <Alert tone="warning" className="mt-2 text-left">{recognitionErrorMessage(recognition.error)}</Alert>
+              ) : recorder.error && recordVoice ? (
+                <Alert tone="warning" className="mt-2 text-left">{recorder.errorMessage || recognitionErrorMessage(recorder.error)}</Alert>
+              ) : null}
             </div>
           </Card>
 
@@ -234,7 +283,7 @@ export default function Pronunciation() {
               <p className="mt-3 text-xs text-slate-500">This score is estimated from browser speech recognition and can’t judge individual sounds precisely. Use it as a guide, and compare your recording with Emma’s.</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <Button variant="outline" icon={Play} onClick={() => tts.speak(word.word, { rate: 0.5 })} disabled={!tts.supported}>Hear it again slowly</Button>
-                <Button icon={ChevronRight} onClick={() => step(1)} disabled={atEnd}>Next {isPhrase ? 'phrase' : 'word'}</Button>
+                <Button icon={ChevronRight} onClick={() => step(1)} disabled={atEnd || analyzing}>Next {isPhrase ? 'phrase' : 'word'}</Button>
               </div>
             </Card>
           )}
@@ -278,6 +327,7 @@ export default function Pronunciation() {
                     <button
                       type="button"
                       onClick={() => selectWord(w.id)}
+                      disabled={analyzing}
                       aria-pressed={w.id === word.id}
                       className={cn('flex h-full w-full items-start justify-between gap-2 rounded-xl border px-3 py-2.5 text-left', w.id === word.id ? 'border-brand-600 bg-brand-50 dark:border-brand-400 dark:bg-brand-500/15' : 'border-slate-200 hover:border-slate-300 dark:border-slate-700')}
                     >
@@ -295,7 +345,7 @@ export default function Pronunciation() {
                 );
               })}
             </ul>
-            <p className="mt-3 text-xs text-slate-500">Your attempts are saved to your history automatically when you leave this page.</p>
+            <p className="mt-3 text-xs text-slate-500">Your attempts are saved to your history automatically when you leave or switch away from this page.</p>
           </Card>
         </div>
       </div>

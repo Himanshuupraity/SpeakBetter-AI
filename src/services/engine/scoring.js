@@ -23,6 +23,16 @@ export const SCORE_COMPONENTS = [
   { id: 'naturalness', label: 'Naturalness', max: 10, source: 'Transcript analysis' },
 ];
 
+const MAX = Object.fromEntries(SCORE_COMPONENTS.map((c) => [c.id, c.max]));
+
+/** Word count of one turn — an empty turn is 0 words, not 1. */
+const wordsIn = (text) => (text || '').trim().split(/\s+/).filter(Boolean).length;
+
+/** A score from an external API, kept inside 0…max (null if missing or not a number). */
+function externalScore(value, max) {
+  return typeof value === 'number' && Number.isFinite(value) ? clamp(Math.round(value), 0, max) : null;
+}
+
 const GRAMMAR_CATS = new Set(['verb-tense', 'verb-form', 'subject-verb', 'articles', 'prepositions', 'plural-singular', 'adjectives']);
 
 /**
@@ -31,8 +41,8 @@ const GRAMMAR_CATS = new Set(['verb-tense', 'verb-form', 'subject-verb', 'articl
  * @param {Array} input.issues all issues found in the user's turns
  * @param {{pronunciation?:number, fluency?:number}} [input.external] scores from a real speech API (0-20)
  */
-export function scoreSpeaking({ turns, issues, external = {} }) {
-  const text = turns.map((t) => t.text).join(' ');
+export function scoreSpeaking({ turns = [], issues = [], external = {} }) {
+  const text = turns.map((t) => t.text || '').join(' ');
   const sig = vocabularySignals(text);
   const turnCount = Math.max(1, turns.length);
   const avgWords = sig.totalWords / turnCount;
@@ -50,9 +60,12 @@ export function scoreSpeaking({ turns, issues, external = {} }) {
   );
 
   const voiceTurns = turns.filter((t) => t.viaVoice);
-  let pronunciation = external.pronunciation ?? null;
+  const noSpeech = sig.totalWords === 0; // nothing said → nothing to give credit for
+  let pronunciation = externalScore(external.pronunciation, MAX.pronunciation);
   let pronunciationNote = 'Measured by the connected speech API.';
-  if (pronunciation == null && voiceTurns.length) {
+  if (pronunciation == null && noSpeech) {
+    pronunciationNote = 'Not measured — no speech was recorded.';
+  } else if (pronunciation == null && voiceTurns.length) {
     const conf = average(voiceTurns.map((t) => (typeof t.confidence === 'number' && t.confidence > 0 ? t.confidence : 0.8)));
     pronunciation = clamp(Math.round(5 + conf * conf * 15), 5, 20);
     pronunciationNote = 'Estimated from how confidently your browser recognised your speech. This is a rough signal, not a detailed pronunciation assessment.';
@@ -60,13 +73,16 @@ export function scoreSpeaking({ turns, issues, external = {} }) {
     pronunciationNote = 'Not measured — you typed your answers. Speak with the microphone to include pronunciation.';
   }
 
-  let fluency = external.fluency ?? null;
+  let fluency = externalScore(external.fluency, MAX.fluency);
   let fluencyNote = 'Measured by the connected speech API.';
-  if (fluency == null) {
+  if (fluency == null && noSpeech) {
+    fluency = 0;
+    fluencyNote = 'Not measured — no speech was recorded.';
+  } else if (fluency == null) {
     const lengthScore = Math.min(9, avgWords * 0.75);
     const spoken = voiceTurns.filter((t) => t.spokenMs > 800);
     if (spoken.length) {
-      const wpm = average(spoken.map((t) => (t.text.split(/\s+/).length / t.spokenMs) * 60000));
+      const wpm = average(spoken.map((t) => (wordsIn(t.text) / t.spokenMs) * 60000));
       const rateScore = wpm >= 90 && wpm <= 170 ? 7 : wpm >= 60 ? 5 : 3;
       fluency = clamp(Math.round(4 + lengthScore + rateScore - Math.min(3, sig.fillers)), 4, 20);
       fluencyNote = `Estimated: about ${Math.round(wpm)} words per minute and ${avgWords.toFixed(1)} words per answer.`;
@@ -76,17 +92,19 @@ export function scoreSpeaking({ turns, issues, external = {} }) {
     }
   }
 
-  const shortTurns = turns.filter((t) => t.text.split(/\s+/).length < 4).length / turnCount;
+  const shortTurns = turns.filter((t) => wordsIn(t.text) < 4).length / turnCount;
   const sentence = clamp(Math.round(10 - orderErrors * 2 - shortTurns * 4 - (avgWords < 6 ? 1 : 0)), 3, 10);
   const naturalness = clamp(Math.round(5 + Math.min(2, sig.contractions) + Math.min(3, sig.connectors) - vocabErrors * 1.5), 3, 10);
 
-  const breakdown = { grammar, vocabulary, pronunciation, fluency, sentence, naturalness };
+  const breakdown = noSpeech
+    ? { grammar: 0, vocabulary: 0, pronunciation, fluency, sentence: 0, naturalness: 0 }
+    : { grammar, vocabulary, pronunciation, fluency, sentence, naturalness };
   const earned = Object.values(breakdown).filter((v) => v != null).reduce((a, b) => a + b, 0);
   const possible = SCORE_COMPONENTS.filter((c) => breakdown[c.id] != null).reduce((a, c) => a + c.max, 0);
-  const overall = Math.round((earned / possible) * 100);
+  const overall = possible ? Math.round((earned / possible) * 100) : 0;
 
   // Confidence is an indicator only (not part of the 100 points).
-  const confidence = clamp(Math.round(50 + Math.min(30, avgWords * 2.5) + Math.min(15, turns.length * 2) - sig.fillers * 3), 30, 98);
+  const confidence = noSpeech ? 0 : clamp(Math.round(50 + Math.min(30, avgWords * 2.5) + Math.min(15, turns.length * 2) - sig.fillers * 3), 30, 98);
 
   return {
     overall,

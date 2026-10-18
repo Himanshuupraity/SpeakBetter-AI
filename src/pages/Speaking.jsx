@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Keyboard, Mic, PhoneOff, Send, Volume2, VolumeX } from 'lucide-react';
+import { useBlocker, useNavigate, useSearchParams } from 'react-router-dom';
+import { Keyboard, Mic, PhoneOff, RotateCcw, Send, Volume2, VolumeX } from 'lucide-react';
 import PageHeader from '../components/common/PageHeader.jsx';
 import Button from '../components/common/Button.jsx';
 import Alert from '../components/common/Alert.jsx';
@@ -52,9 +52,25 @@ export default function Speaking() {
   const controlsRef = useRef(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // Async work (Emma's reply, end-of-speech callbacks) checks these before touching
+  // the page: a reply that lands after unmount or after the session ended is dropped.
+  const mountedRef = useRef(true);
+  const sessionGen = useRef(0);
+  const inputModeRef = useRef(inputMode);
+  inputModeRef.current = inputMode;
+  const autoListenRef = useRef(settings.autoListen);
+  autoListenRef.current = settings.autoListen;
 
   const tts = useTextToSpeech();
   const autoSpeak = settings.autoSpeak && tts.supported;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      sessionGen.current += 1;
+    };
+  }, []);
 
   const handleUserTurn = useRef(null);
   // Keeps listening through short pauses; sends automatically after 4 s of silence
@@ -71,13 +87,15 @@ export default function Speaking() {
       handleUserTurn.current?.(transcript, { viaVoice: true, confidence, spokenMs });
     },
   });
+  const recognitionRef = useRef(recognition);
+  recognitionRef.current = recognition;
   const interim = recognition.listening ? recognition.liveText : '';
   const sendingIn = recognition.listening && recognition.quietMs >= 1500 ? Math.max(1, Math.ceil((SILENCE_MS - recognition.quietMs) / 1000)) : null;
 
   // Recognition errors → friendly message; fall back to typing when the mic can't work.
   useEffect(() => {
     if (!recognition.error) return;
-    const fatal = ['not-allowed', 'service-not-allowed', 'not-supported', 'insecure', 'audio-capture'].includes(recognition.error);
+    const fatal = ['not-allowed', 'service-not-allowed', 'not-supported', 'insecure', 'audio-capture', 'restart-failed'].includes(recognition.error);
     setNotice({ tone: fatal ? 'warning' : 'info', text: recognitionErrorMessage(recognition.error) });
     if (fatal) setInputMode('text');
     setStatus('idle');
@@ -109,26 +127,29 @@ export default function Speaking() {
 
   useEffect(() => () => tts.cancel(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Emma finished (or stopped) speaking: hand the turn back, re-opening the mic if hands-free. */
+  const afterEmmaSpoke = useCallback((gen) => {
+    if (!mountedRef.current || gen !== sessionGen.current) return;
+    setStatus('idle');
+    if (autoListenRef.current && inputModeRef.current === 'voice') recognitionRef.current.start();
+  }, []);
+
   const emmaSays = useCallback(
-    (text) => {
+    (text, gen) => {
       setMessages((m) => [...m, { role: 'ai', text }]);
       if (autoSpeak) {
         setStatus('speaking');
-        tts.speak(text, {
-          onEnd: () => {
-            setStatus('idle');
-            if (settings.autoListen && inputMode === 'voice') recognition.start();
-          },
-        });
+        tts.speak(text, { onEnd: () => afterEmmaSpoke(gen) });
       } else {
         setStatus('idle');
       }
     },
-    [autoSpeak, tts, settings.autoListen, inputMode, recognition],
+    [autoSpeak, tts, afterEmmaSpoke],
   );
 
   const askEmma = useCallback(
     async (history) => {
+      const gen = sessionGen.current;
       setStatus('thinking');
       try {
         const reply = await aiService.generateConversation({
@@ -138,14 +159,35 @@ export default function Speaking() {
           history,
           focusTip: config.mode === 'free' && history.length === 0 ? teacherService.getSessionFocusTip(stats) : undefined,
         });
+        if (!mountedRef.current || gen !== sessionGen.current) return;
         if (reply.fallback) setNotice({ tone: 'info', text: 'Emma’s AI service is unavailable right now, so you’re chatting with demo responses.' });
-        emmaSays(reply.text);
+        emmaSays(reply.text, gen);
       } catch {
+        if (!mountedRef.current || gen !== sessionGen.current) return;
         setStatus('idle');
-        setNotice({ tone: 'error', text: 'Emma couldn’t respond just now. Please try sending your message again.' });
+        // Take the unanswered turn back out so retrying never duplicates it.
+        const failed = history[history.length - 1];
+        if (failed?.role === 'user') {
+          setMessages((m) => m.filter((x) => x !== failed));
+          if (!failed.viaVoice) setDraft((d) => d || failed.text);
+        }
+        setNotice({
+          tone: 'error',
+          text: failed?.role === 'user' ? 'Emma couldn’t respond just now, so your last reply wasn’t sent.' : 'Emma couldn’t start the conversation just now.',
+          retry: () => {
+            setNotice(null);
+            if (failed?.role === 'user') {
+              const { role, text, ...meta } = failed; // eslint-disable-line no-unused-vars
+              if (!failed.viaVoice) setDraft((d) => (d === text ? '' : d));
+              handleUserTurn.current(text, meta);
+            } else {
+              askEmma(messagesRef.current);
+            }
+          },
+        });
       }
     },
-    [config, stats, emmaSays],
+    [config, stats, emmaSays], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   handleUserTurn.current = (text, meta) => {
@@ -161,6 +203,7 @@ export default function Speaking() {
   };
 
   const start = () => {
+    sessionGen.current += 1;
     updateSettings({ personality: config.personality });
     setMessages([]);
     setNotice(null);
@@ -187,6 +230,7 @@ export default function Speaking() {
 
   const endSession = async () => {
     setConfirmEnd(false);
+    sessionGen.current += 1; // ignore any reply still on its way
     recognition.abort();
     tts.cancel();
     const turns = messages.filter((m) => m.role === 'user');
@@ -215,6 +259,45 @@ export default function Speaking() {
 
   const userTurns = messages.filter((m) => m.role === 'user').length;
   const mode = getMode(config.mode);
+  const unsaved = phase === 'active' && userTurns > 0;
+
+  // Warn before an in-progress conversation is lost — in-app navigation…
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => unsaved && currentLocation.pathname !== nextLocation.pathname);
+  // …and closing or reloading the tab.
+  useEffect(() => {
+    if (!unsaved) return undefined;
+    const warn = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsaved]);
+
+  const leaveSession = () => {
+    sessionGen.current += 1;
+    recognition.abort();
+    tts.cancel();
+    blocker.proceed?.();
+  };
+
+  const toggleVoice = () => {
+    const muting = settings.autoSpeak;
+    updateSettings({ autoSpeak: !muting });
+    if (muting && (tts.speaking || status === 'speaking')) {
+      tts.cancel(); // cancelling skips onEnd, so hand the turn back here
+      afterEmmaSpoke(sessionGen.current);
+    }
+  };
+
+  const replay = (text) => {
+    // Replaying interrupts Emma's current line (its onEnd won't fire), so don't stay "speaking".
+    if (status === 'speaking') setStatus('idle');
+    tts.speak(text);
+  };
+
+  const lastMessage = messages[messages.length - 1];
+  const srCaptureStatus = recognition.listening ? (sendingIn ? 'Sending soon. Keep talking to continue.' : '') : recognition.status === 'processing' ? 'Sending your reply.' : '';
 
   if (phase === 'analyzing') {
     return (
@@ -266,10 +349,7 @@ export default function Speaking() {
             <p className="font-mono text-sm font-semibold tabular-nums" aria-label={`Session time ${formatClock(seconds)}`}>{formatClock(seconds)}</p>
             <button
               type="button"
-              onClick={() => {
-                if (tts.speaking) tts.cancel();
-                updateSettings({ autoSpeak: !settings.autoSpeak });
-              }}
+              onClick={toggleVoice}
               className="mt-0.5 inline-flex items-center gap-1 rounded-lg p-1 text-xs text-slate-500 hover:text-slate-700"
               aria-label={settings.autoSpeak ? 'Mute Emma’s voice' : 'Turn on Emma’s voice'}
               aria-pressed={!settings.autoSpeak}
@@ -282,9 +362,9 @@ export default function Speaking() {
       </div>
 
       {/* Transcript */}
-      <ol ref={listRef} className="flex-1 space-y-4 py-5" aria-label="Conversation transcript" aria-live="polite">
+      <ol ref={listRef} className="flex-1 space-y-4 py-5" aria-label="Conversation transcript">
         {messages.map((m, i) => (
-          <ChatBubble key={i} message={m} onReplay={tts.supported ? (t) => tts.speak(t) : undefined} />
+          <ChatBubble key={i} message={m} onReplay={tts.supported ? replay : undefined} />
         ))}
         {interim && <ChatBubble message={{ role: 'user', text: interim }} interim />}
         {status === 'thinking' && (
@@ -292,10 +372,23 @@ export default function Speaking() {
         )}
       </ol>
       <div ref={endRef} aria-hidden="true" />
+      {/* Announces only finished messages — never the live (interim) transcript. */}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {lastMessage ? `${lastMessage.role === 'ai' ? 'Emma said' : 'You said'}: ${lastMessage.text}` : ''}
+      </p>
 
       {/* Controls */}
-      <div ref={controlsRef} className="sticky bottom-16 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-4 backdrop-blur sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8 dark:border-slate-800 dark:bg-slate-900/95">
-        {notice && <Alert tone={notice.tone} className="mb-3" onDismiss={() => setNotice(null)}>{notice.text}</Alert>}
+      <div ref={controlsRef} className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 pt-3 pb-4 backdrop-blur sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8 dark:border-slate-800 dark:bg-slate-900/95">
+        {notice && (
+          <Alert
+            tone={notice.tone}
+            className="mb-3"
+            onDismiss={() => setNotice(null)}
+            action={notice.retry && <Button size="sm" variant="outline" icon={RotateCcw} onClick={notice.retry} disabled={status === 'thinking'}>Retry</Button>}
+          >
+            {notice.text}
+          </Alert>
+        )}
         {inputMode === 'voice' ? (
           <div className="flex items-center justify-between gap-3">
             <Button variant="ghost" size="md" icon={Keyboard} onClick={() => { recognition.abort(); setInputMode('text'); }} aria-label="Type instead">
@@ -303,11 +396,12 @@ export default function Speaking() {
             </Button>
             <div className="flex flex-col items-center gap-1">
               <MicButton listening={recognition.listening} disabled={status === 'thinking'} onClick={toggleMic} />
-              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500" aria-hidden="true">
                 {recognition.listening ? (
                   sendingIn ? <>Sending in {sendingIn}s… keep talking to continue</> : <><span className="size-2 animate-pulse rounded-full bg-rose-500" aria-hidden="true" />Recording — tap ■ to send</>
                 ) : recognition.status === 'processing' ? 'Sending…' : 'Tap to speak'}
               </span>
+              <span role="status" className="sr-only">{srCaptureStatus}</span>
             </div>
             <Button variant="outline" size="md" icon={PhoneOff} onClick={() => setConfirmEnd(true)} className="text-rose-600 dark:text-rose-400">
               <span className="hidden sm:inline">End session</span><span className="sm:hidden">End</span>
@@ -343,6 +437,16 @@ export default function Speaking() {
         onCancel={() => setConfirmEnd(false)}
       >
         {userTurns ? `Emma will analyse your ${userTurns} ${userTurns === 1 ? 'reply' : 'replies'} and show your score and every mistake.` : 'You haven’t replied yet, so there’s nothing to analyse.'}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title="Leave this conversation?"
+        confirmLabel="Leave without saving"
+        onConfirm={leaveSession}
+        onCancel={() => blocker.reset?.()}
+      >
+        {`Your ${userTurns} ${userTurns === 1 ? 'reply' : 'replies'} won’t be analysed or saved. To keep them, stay and tap “End session”.`}
       </ConfirmDialog>
     </div>
   );

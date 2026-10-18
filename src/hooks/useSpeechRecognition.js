@@ -7,6 +7,20 @@ import { speechService } from '../services/speechService.js';
  * onResult({ transcript, confidence, alternatives, spokenMs }) fires once when the
  * recogniser finishes with a non-empty final transcript.
  */
+/** Detach handlers before aborting so a replaced/unmounted recogniser can't fire stale events. */
+function detachAndAbort(rec) {
+  if (!rec) return;
+  rec.onstart = null;
+  rec.onresult = null;
+  rec.onend = null;
+  rec.onerror = null;
+  try {
+    rec.abort();
+  } catch {
+    /* ignore */
+  }
+}
+
 export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onResult } = {}) {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
@@ -22,14 +36,9 @@ export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onRe
   }, []);
 
   const abort = useCallback(() => {
-    const rec = recRef.current;
-    if (rec) {
-      // Detach first so a cancelled recording can never deliver a late result.
-      rec.onresult = null;
-      rec.onend = null;
-      rec.onerror = null;
-    }
-    rec?.abort();
+    // Detach first so a cancelled recording can never deliver a late result.
+    detachAndAbort(recRef.current);
+    recRef.current = null;
     setListening(false);
     setInterim('');
   }, []);
@@ -44,7 +53,8 @@ export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onRe
       setError('insecure');
       return false;
     }
-    recRef.current?.abort();
+    detachAndAbort(recRef.current);
+    recRef.current = null;
     const rec = speechService.createRecognition({ lang, maxAlternatives, interimResults: true });
     recRef.current = rec;
     let finalText = '';
@@ -79,6 +89,7 @@ export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onRe
       if (event.error !== 'aborted') setError(event.error);
     };
     rec.onend = () => {
+      if (recRef.current === rec) recRef.current = null;
       setListening(false);
       const transcript = finalText.trim();
       setInterim('');
@@ -96,12 +107,21 @@ export function useSpeechRecognition({ lang = 'en-US', maxAlternatives = 1, onRe
       rec.start();
       return true;
     } catch {
+      detachAndAbort(rec);
+      if (recRef.current === rec) recRef.current = null;
+      setListening(false);
       setError('start-failed');
       return false;
     }
   }, [lang, maxAlternatives, supported]);
 
-  useEffect(() => () => recRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      detachAndAbort(recRef.current);
+      recRef.current = null;
+    },
+    [],
+  );
 
   return { supported, listening, interim, error, start, stop, abort, clearError: () => setError(null) };
 }

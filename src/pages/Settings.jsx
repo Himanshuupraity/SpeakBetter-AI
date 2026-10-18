@@ -60,8 +60,8 @@ export default function Settings() {
     try {
       importState(await file.text());
       toast.show('Your data was imported.', { type: 'success' });
-    } catch {
-      toast.show('That file could not be read. Please choose a SpeakBetter backup (.json).', { type: 'warning' });
+    } catch (err) {
+      toast.show(err?.message || 'That file could not be read. Please choose a SpeakBetter backup (.json).', { type: 'warning' });
     }
     e.target.value = '';
   };

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Briefcase, ClipboardCheck, Globe, Handshake, MessagesSquare, PenLine, Plane, Volume2 } from 'lucide-react';
 import Button from '../components/common/Button.jsx';
@@ -24,19 +24,54 @@ export const GOALS = [
 
 const STEPS = ['name', 'level', 'goal', 'time', 'plan'];
 
+// Answers in progress survive the level-test detour (and reloads) for this tab only.
+const DRAFT_KEY = 'speakbetter:onboarding-draft';
+function readDraft() {
+  try {
+    return JSON.parse(sessionStorage.getItem(DRAFT_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+function writeDraft(draft) {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    /* storage unavailable — the draft just won't survive navigation */
+  }
+}
+function clearDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function Onboarding() {
   useDocumentTitle('Get started');
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { state, completeOnboarding } = useApp();
   const fromTest = params.get('from') === 'test';
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState(state.profile.name || '');
-  const [level, setLevel] = useState(state.profile.level || 'B1');
-  const [goal, setGoal] = useState(state.profile.goal || 'speaking');
-  const [minutes, setMinutes] = useState(state.profile.dailyMinutes || 25);
-  const [loadDemo, setLoadDemo] = useState(true);
+  const [draft] = useState(readDraft);
+  const draftName = typeof draft.name === 'string' ? draft.name : '';
+  const [name, setName] = useState(draftName || state.profile.name || '');
+  // Back from the level test: pick up where the level is chosen (if we already have a name).
+  const [step, setStep] = useState(() => {
+    if (fromTest && (draftName || state.profile.name)) return STEPS.indexOf('level');
+    return Number.isInteger(draft.step) && draft.step >= 0 && draft.step < STEPS.length && draftName ? draft.step : 0;
+  });
+  // A fresh test result wins over the earlier choice.
+  const [level, setLevel] = useState((fromTest && state.profile.levelTest?.level) || draft.level || state.profile.level || 'B1');
+  const [goal, setGoal] = useState(draft.goal || state.profile.goal || 'speaking');
+  const [minutes, setMinutes] = useState(draft.minutes || state.profile.dailyMinutes || 25);
+  const [loadDemo, setLoadDemo] = useState(draft.loadDemo ?? true);
   const [nameError, setNameError] = useState('');
+
+  useEffect(() => {
+    if (!state.profile.onboarded) writeDraft({ step, name, level, goal, minutes, loadDemo });
+  }, [step, name, level, goal, minutes, loadDemo, state.profile.onboarded]);
 
   if (state.profile.onboarded) return <Navigate to="/" replace />;
 
@@ -50,6 +85,7 @@ export default function Onboarding() {
     }
     if (step < STEPS.length - 1) setStep(step + 1);
     else {
+      clearDraft();
       completeOnboarding({ name: name.trim(), level, goal, dailyMinutes: minutes }, { loadDemo });
       navigate('/', { replace: true });
     }
@@ -124,7 +160,7 @@ export default function Onboarding() {
                 onChange={setLevel}
               />
               {!state.profile.levelTest && (
-                <Button to="/level-test" variant="ghost" icon={ClipboardCheck} className="mt-3">Not sure? Take the level test</Button>
+                <Button to="/level-test?from=onboarding" variant="ghost" icon={ClipboardCheck} className="mt-3">Not sure? Take the level test</Button>
               )}
             </div>
           )}

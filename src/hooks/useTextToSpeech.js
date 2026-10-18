@@ -24,9 +24,17 @@ export function useTextToSpeech() {
     return () => {
       alive = false;
       if (supported) window.speechSynthesis.removeEventListener('voiceschanged', refresh);
-      if (supported) window.speechSynthesis.cancel();
     };
   }, [supported]);
+
+  // On unmount, invalidate any running speak/speakLines so no callbacks fire after navigation.
+  useEffect(
+    () => () => {
+      tokenRef.current += 1;
+      if (supported) window.speechSynthesis.cancel();
+    },
+    [supported],
+  );
 
   const cancel = useCallback(() => {
     tokenRef.current += 1;
@@ -59,11 +67,12 @@ export function useTextToSpeech() {
             }
           };
         }
-        u.onerror = () => {
-          if (token === tokenRef.current) {
-            setSpeaking(false);
-            if (i === parts.length - 1) onEnd?.();
-          }
+        u.onerror = (e) => {
+          if (token !== tokenRef.current) return;
+          // Cancelled on purpose (new speech, cancel(), unmount) — not a natural end.
+          if (e?.error === 'interrupted' || e?.error === 'canceled') return;
+          setSpeaking(false);
+          if (i === parts.length - 1) onEnd?.();
         };
         window.speechSynthesis.speak(u);
       });
@@ -125,6 +134,7 @@ export function useTextToSpeech() {
           if (done) return;
           done = true;
           clearTimeout(watchdog);
+          if (token !== tokenRef.current) return;
           const pause = lines[i + 1] && lines[i + 1].speaker !== line.speaker ? 450 : 150;
           setTimeout(() => playLine(i + 1), pause);
         }

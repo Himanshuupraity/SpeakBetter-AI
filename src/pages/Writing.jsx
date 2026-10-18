@@ -11,6 +11,7 @@ import { useApp } from '../context/AppContext.jsx';
 import { aiService } from '../services/aiService.js';
 import { cn } from '../utils/cn.js';
 import StickyActions from '../components/common/StickyActions.jsx';
+import { onRadioKeyDown, radioTabIndex } from '../components/common/rovingRadio.js';
 
 const MIN_WORDS = 5;
 
@@ -65,13 +66,15 @@ export default function Writing() {
         <form onSubmit={submit} className="space-y-4">
           <div className="scrollbar-none -mx-4 overflow-x-auto px-4">
             <div role="radiogroup" aria-label="Writing type" className="flex gap-2">
-              {WRITING_TYPES.map((t) => (
+              {WRITING_TYPES.map((t, i) => (
                 <button
                   key={t.id}
                   type="button"
                   role="radio"
                   aria-checked={t.id === typeId}
+                  tabIndex={radioTabIndex(i, WRITING_TYPES.findIndex((x) => x.id === typeId))}
                   onClick={() => setTypeId(t.id)}
+                  onKeyDown={(e) => onRadioKeyDown(e, i, WRITING_TYPES.length, (n) => setTypeId(WRITING_TYPES[n].id))}
                   className={cn('h-10 shrink-0 rounded-full border px-4 text-sm font-medium', t.id === typeId ? 'border-brand-600 bg-brand-50 text-brand-800 dark:border-brand-400 dark:bg-brand-500/15 dark:text-brand-200' : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300')}
                 >
                   {t.label}

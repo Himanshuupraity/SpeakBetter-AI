@@ -13,6 +13,7 @@ import ProgressRing from './ProgressRing.jsx';
 import { gradeQuiz } from '../../services/grammarService.js';
 import { cn } from '../../utils/cn.js';
 import StickyActions from './StickyActions.jsx';
+import { onRadioKeyDown, radioTabIndex } from './rovingRadio.js';
 
 const TYPE_LABEL = { mcq: 'Multiple choice', truefalse: 'True or false', vocab: 'Vocabulary', mainidea: 'Main idea', fill: 'Fill in the blank' };
 
@@ -109,7 +110,11 @@ export default function Quiz({ questions, mode = 'quiz', onComplete, onRetry, re
                 type="button"
                 role="radio"
                 aria-checked={isSel}
+                tabIndex={radioTabIndex(i, selected)}
                 onClick={() => choose(i)}
+                // Arrows select in quiz mode; in practice mode choosing reveals the answer,
+                // so arrows only move focus and Space/Enter confirms.
+                onKeyDown={(e) => onRadioKeyDown(e, i, q.options.length, mode === 'practice' ? undefined : choose)}
                 className={cn(
                   'flex min-h-12 w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left text-[15px] transition-colors',
                   good ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : bad ? 'border-rose-500 bg-rose-50 dark:bg-rose-500/10' : isSel ? 'border-brand-600 bg-brand-50 dark:border-brand-400 dark:bg-brand-500/15' : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600',

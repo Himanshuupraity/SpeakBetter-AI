@@ -26,6 +26,8 @@ const COMMON_GROUPS = [
 
 export default function SpeakingReport({ report }) {
   const counts = report.categoryCounts || {};
+  const strengths = Array.isArray(report.strengths) ? report.strengths : [];
+  const improvements = Array.isArray(report.improvements) ? report.improvements : [];
   return (
     <div className="space-y-5">
       {report.fallback && <Alert tone="info">The AI analysis service was unavailable, so this report was generated in demo mode.</Alert>}
@@ -83,16 +85,16 @@ export default function SpeakingReport({ report }) {
         </details>
       </Card>
 
-      {(report.strengths?.length > 0 || report.improvements?.length > 0) && (
+      {(strengths.length > 0 || improvements.length > 0) && (
         <div className="grid gap-5 md:grid-cols-2">
           <Card>
             <CardTitle icon={ThumbsUp}>What went well</CardTitle>
-            <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700 dark:text-slate-300">{report.strengths.map((s) => <li key={s}>{s}</li>)}</ul>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700 dark:text-slate-300">{strengths.length ? strengths.map((s) => <li key={s}>{s}</li>) : <li>You kept the conversation going — that’s a great start.</li>}</ul>
           </Card>
           <Card>
             <CardTitle icon={Target}>Focus next</CardTitle>
-            {report.improvements.length ? (
-              <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700 dark:text-slate-300">{report.improvements.map((s) => <li key={s}>{s}</li>)}</ul>
+            {improvements.length ? (
+              <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700 dark:text-slate-300">{improvements.map((s) => <li key={s}>{s}</li>)}</ul>
             ) : (
               <p className="text-sm text-slate-600 dark:text-slate-400">Nothing major — keep practising to stay sharp!</p>
             )}

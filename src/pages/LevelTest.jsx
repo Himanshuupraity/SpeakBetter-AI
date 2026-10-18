@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, ClipboardCheck, Clock } from 'lucide-react';
 import Button from '../components/common/Button.jsx';
 import Card from '../components/common/Card.jsx';
@@ -41,6 +41,8 @@ function estimate(results) {
 export default function LevelTest() {
   useDocumentTitle('Level Test');
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const fromOnboarding = params.get('from') === 'onboarding';
   const { state, updateProfile, recordSession } = useApp();
   const [started, setStarted] = useState(false);
   const [startedAt, setStartedAt] = useState(0);
@@ -66,7 +68,7 @@ export default function LevelTest() {
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
       <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
-        <Link to={onboarded ? '/' : '/welcome'} className="flex items-center gap-1 rounded-lg p-2 text-sm font-medium text-slate-600 dark:text-slate-300" aria-label="Exit level test">
+        <Link to={onboarded ? '/' : fromOnboarding ? '/onboarding?from=test' : '/welcome'} className="flex items-center gap-1 rounded-lg p-2 text-sm font-medium text-slate-600 dark:text-slate-300" aria-label="Exit level test">
           <ArrowLeft className="size-5" aria-hidden="true" />
         </Link>
         <Logo compact />

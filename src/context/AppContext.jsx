@@ -21,7 +21,8 @@ function mergeMistakes(existing, incoming, extra = {}) {
     const key = `${m.category}|${m.said.toLowerCase().trim()}`;
     const i = list.findIndex((x) => `${x.category}|${x.said.toLowerCase().trim()}` === key);
     if (i >= 0) {
-      list[i] = { ...list[i], count: (list[i].count || 1) + 1, lastSeen: now, mastered: false };
+      // Repeating a sample mistake makes it the learner's own, so it survives "clear sample data".
+      list[i] = { ...list[i], count: (list[i].count || 1) + 1, lastSeen: now, mastered: false, demo: false };
     } else {
       list.unshift({ id: uid('m'), count: 1, mastered: false, createdAt: now, lastSeen: now, categories: [m.category], reasons: [], ...m, ...extra });
     }
@@ -39,10 +40,19 @@ export function AppProvider({ children }) {
   const [state, setState] = useState(() => storageService.load());
   const toast = useToast();
   const silentAchievements = useRef(false);
+  const [storageError, setStorageError] = useState(false);
+  const storageWarned = useRef(false);
 
   useEffect(() => {
-    storageService.save(state);
-  }, [state]);
+    const ok = storageService.save(state);
+    if (!storageService.isPersistent) return;
+    if (!ok && !storageWarned.current) {
+      // Warn once per session; the app keeps working in memory.
+      storageWarned.current = true;
+      toast.show('Your browser storage is full or blocked, so recent progress may not be saved. Export a backup from Settings to keep it.', { type: 'warning', title: 'Progress not saved', duration: 8000 });
+    }
+    setStorageError(!ok);
+  }, [state, toast]);
 
   const stats = useMemo(() => computeStats(state), [state]);
 
@@ -59,7 +69,11 @@ export function AppProvider({ children }) {
   // Unlock achievements as stats change.
   useEffect(() => {
     const newly = achievementProgress(stats).filter((a) => a.unlocked && !state.achievements[a.id]);
-    if (!newly.length) return;
+    if (!newly.length) {
+      // Reset even when nothing unlocked, so the next genuine unlock still shows a toast.
+      silentAchievements.current = false;
+      return;
+    }
     const now = new Date().toISOString();
     setState((s) => ({ ...s, achievements: { ...s.achievements, ...Object.fromEntries(newly.map((a) => [a.id, now])) } }));
     if (!silentAchievements.current) {
@@ -119,7 +133,8 @@ export function AppProvider({ children }) {
   const updateWord = useCallback((wordId, patch) => {
     setState((s) => {
       const current = s.vocab[wordId] || { learned: false, favorite: false, box: 0, reviews: 0 };
-      const next = { ...current, ...patch };
+      // Touching a sample word makes it the learner's own.
+      const next = { ...current, ...patch, demo: false };
       if (patch.learned && !current.learned) {
         next.box = Math.max(1, current.box || 0);
         next.due = new Date(Date.now() + SR_INTERVAL_DAYS[next.box] * 86400000).toISOString();
@@ -140,7 +155,7 @@ export function AppProvider({ children }) {
       const due = new Date(Date.now() + days * 86400000 + (grade === 'again' ? 10 * 60000 : 0)).toISOString();
       return {
         ...s,
-        vocab: { ...s.vocab, [wordId]: { ...current, learned: true, box, due, reviews: (current.reviews || 0) + 1, lastReviewed: new Date().toISOString() } },
+        vocab: { ...s.vocab, [wordId]: { ...current, learned: true, box, due, reviews: (current.reviews || 0) + 1, lastReviewed: new Date().toISOString(), demo: false } },
       };
     });
   }, []);
@@ -155,17 +170,23 @@ export function AppProvider({ children }) {
   }, []);
 
   const clearDemoData = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      sessions: s.sessions.filter((x) => !x.demo),
-      mistakes: s.mistakes.filter((x) => !x.demo),
-      vocab: Object.fromEntries(Object.entries(s.vocab).filter(([, v]) => !v.demo)),
-      xp: Math.max(0, s.xp - (s.demoXp || 0)),
-      demoXp: 0,
-      achievements: {},
-      hasDemoData: false,
-    }));
     silentAchievements.current = true;
+    setState((s) => {
+      const next = {
+        ...s,
+        sessions: s.sessions.filter((x) => !x.demo),
+        mistakes: s.mistakes.filter((x) => !x.demo),
+        vocab: Object.fromEntries(Object.entries(s.vocab).filter(([, v]) => !v.demo)),
+        xp: Math.max(0, s.xp - (s.demoXp || 0)),
+        demoXp: 0,
+        hasDemoData: false,
+      };
+      // Unlock timestamps don't record their source, so keep (with original dates)
+      // only the achievements the learner's own data still earns.
+      const stillUnlocked = new Set(achievementProgress(computeStats(next)).filter((a) => a.unlocked).map((a) => a.id));
+      next.achievements = Object.fromEntries(Object.entries(s.achievements).filter(([id]) => stillUnlocked.has(id)));
+      return next;
+    });
   }, []);
 
   const resetAll = useCallback(() => {
@@ -182,7 +203,7 @@ export function AppProvider({ children }) {
     [completeOnboarding, updateProfile, updateSettings, recordSession, addMistakes, updateMistake, deleteMistake, updateWord, reviewWord, loadDemoData, clearDemoData, resetAll, importState],
   );
 
-  const value = useMemo(() => ({ state, stats, ...actions }), [state, stats, actions]);
+  const value = useMemo(() => ({ state, stats, storageError, ...actions }), [state, stats, storageError, actions]);
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

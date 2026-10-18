@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "npm --prefix server start",
-    "server:install": "npm --prefix server install"
+    "server:install": "npm --prefix server install",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "lucide-react": "^1.48.0",

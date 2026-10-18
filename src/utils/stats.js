@@ -28,7 +28,7 @@ export const SESSION_TYPES = {
 };
 
 export function minutesOn(sessions, key) {
-  return sessions.filter((s) => dayKey(s.date) === key).reduce((sum, s) => sum + s.durationSec / 60, 0);
+  return sessions.filter((s) => dayKey(s.date) === key).reduce((sum, s) => sum + (Number(s.durationSec) || 0) / 60, 0);
 }
 
 export function computeStreak(sessions, today = new Date()) {
@@ -122,7 +122,11 @@ export function weakAreas(mistakes) {
 }
 
 export function computeStats(state) {
-  const { sessions, mistakes, vocab, profile } = state;
+  const sessions = Array.isArray(state?.sessions) ? state.sessions.filter((s) => s && typeof s === 'object') : [];
+  const mistakes = Array.isArray(state?.mistakes) ? state.mistakes.filter((m) => m && typeof m === 'object') : [];
+  const vocab = state?.vocab && typeof state.vocab === 'object' && !Array.isArray(state.vocab) ? state.vocab : {};
+  const dailyMinutes = Number(state?.profile?.dailyMinutes) > 0 ? Number(state.profile.dailyMinutes) : 25;
+  const profile = { ...(state?.profile || {}), dailyMinutes };
   const todayKey = dayKey();
   const skillScores = Object.fromEntries(SKILLS.map((s) => [s.id, skillScore(sessions, s.id)]));
   // Pace is tracked separately — it isn't part of the overall English score.
@@ -139,11 +143,11 @@ export function computeStats(state) {
     last7Days: minutesByDay(sessions, 7),
     skillScores,
     overall: overallParts.length ? Math.round(average(overallParts)) : null,
-    totalMinutes: Math.round(sessions.reduce((sum, s) => sum + s.durationSec / 60, 0)),
+    totalMinutes: Math.round(sessions.reduce((sum, s) => sum + (Number(s.durationSec) || 0) / 60, 0)),
     countByType,
     totalSessions: sessions.length,
     conversations: countByType.speaking || 0,
-    wordsLearned: Object.values(vocab).filter((v) => v.learned).length,
+    wordsLearned: Object.values(vocab).filter((v) => v?.learned).length,
     mistakesCorrected: mistakes.filter((m) => m.mastered).length,
     openMistakes: mistakes.filter((m) => !m.mastered).length,
     bestScore: sessions.reduce((max, s) => Math.max(max, s.score || 0), 0),
