@@ -18,6 +18,7 @@ const FOCUS_MESSAGES = {
   vocabulary: { message: "I noticed a few word-choice mistakes. Let's learn some natural alternatives today.", tip: 'Try to use natural, international English expressions today.', to: '/vocabulary', action: 'Learn words' },
   pace: { message: 'Your speaking speed needs a little work. Let’s do a quick read-aloud with the pace guide today.', tip: 'Try to speak at a calm, steady pace today — not too fast, not too slow.', to: '/speed', action: 'Check my speed' },
   pronunciation: { message: "Let's spend 5 minutes practising difficult sounds today.", tip: null, to: '/pronunciation', action: 'Practise sounds' },
+  hindi: { message: 'A few Hindi words and phrases need another try. Let’s review them for 5 minutes today.', tip: null, to: '/hindi', action: 'Practise Hindi' },
 };
 
 export const teacherService = {

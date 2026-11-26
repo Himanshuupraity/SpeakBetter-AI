@@ -1,12 +1,12 @@
 import { Link } from 'react-router-dom';
-import { AudioLines, BookA, Gauge, BookOpen, ChevronRight, ClipboardCheck, GraduationCap, Headphones, Mic, PenLine } from 'lucide-react';
+import { AudioLines, BookA, Gauge, BookOpen, ChevronRight, ClipboardCheck, GraduationCap, Headphones, Languages, Mic, PenLine } from 'lucide-react';
 import { SESSION_TYPES } from '../../utils/stats.js';
 import { formatDate, formatTime } from '../../utils/date.js';
 import { scoreColor } from '../../utils/levels.js';
 import { getMode } from '../../data/conversationModes.js';
 import { cn } from '../../utils/cn.js';
 
-export const SESSION_ICONS = { speaking: Mic, grammar: GraduationCap, vocabulary: BookA, writing: PenLine, reading: BookOpen, listening: Headphones, pronunciation: AudioLines, speed: Gauge, 'level-test': ClipboardCheck };
+export const SESSION_ICONS = { speaking: Mic, grammar: GraduationCap, vocabulary: BookA, writing: PenLine, reading: BookOpen, listening: Headphones, pronunciation: AudioLines, speed: Gauge, 'level-test': ClipboardCheck, hindi: Languages };
 
 export default function SessionListItem({ session: s, showDate = true }) {
   const Icon = SESSION_ICONS[s.type] || Mic;

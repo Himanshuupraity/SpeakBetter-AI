@@ -1,5 +1,5 @@
 import {
-  AudioLines, BookA, Gauge, BookOpen, CalendarCheck, ChartLine, FileClock, GraduationCap, Headphones, House, LayoutGrid,
+  AudioLines, BookA, Gauge, BookOpen, CalendarCheck, ChartLine, FileClock, GraduationCap, Headphones, House, Languages, LayoutGrid,
   MessagesSquare, Mic, PenLine, Settings, Target, User,
 } from 'lucide-react';
 
@@ -31,6 +31,12 @@ export const NAV_GROUPS = [
     ],
   },
   {
+    label: 'Hindi',
+    items: [
+      { to: '/hindi', label: 'Learn Hindi', icon: Languages },
+    ],
+  },
+  {
     label: 'Track',
     items: [
       { to: '/mistakes', label: 'My Mistakes', icon: Target },
@@ -45,7 +51,7 @@ export const NAV_GROUPS = [
 export const BOTTOM_NAV = [
   { to: '/', label: 'Home', icon: House, match: ['/', '/daily'] },
   { to: '/speak', label: 'Speak', icon: Mic, match: ['/speak', '/conversation', '/pronunciation', '/speed'] },
-  { to: '/learn', label: 'Learn', icon: LayoutGrid, match: ['/learn', '/grammar', '/vocabulary', '/writing', '/reading', '/listening'] },
+  { to: '/learn', label: 'Learn', icon: LayoutGrid, match: ['/learn', '/grammar', '/vocabulary', '/writing', '/reading', '/listening', '/hindi'] },
   { to: '/progress', label: 'Progress', icon: ChartLine, match: ['/progress', '/history', '/mistakes'] },
   { to: '/settings', label: 'Profile', icon: User, match: ['/settings'] },
 ];

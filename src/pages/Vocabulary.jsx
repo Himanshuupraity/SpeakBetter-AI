@@ -27,7 +27,8 @@ export default function Vocabulary() {
   const [deck, setDeck] = useState(null); // { title, words, kind }
   const [category, setCategory] = useState('all');
   const [filter, setFilter] = useState('all');
-  const vocab = state.vocab;
+  // Hindi words share the vocab store (ids start with "hi-"); this page shows English words only.
+  const vocab = Object.fromEntries(Object.entries(state.vocab).filter(([id]) => !id.startsWith('hi-')));
 
   const wordOfDay = useMemo(() => seededShuffle(WORDS, `wod-${dayKey()}`)[0], []);
   const daily10 = useMemo(() => {

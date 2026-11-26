@@ -42,6 +42,7 @@ export const MISTAKE_CATEGORIES = {
   punctuation: { label: 'Punctuation & capitals', topic: null },
   pronunciation: { label: 'Pronunciation', topic: null },
   pace: { label: 'Speaking pace', topic: null },
+  hindi: { label: 'Hindi', topic: null },
 };
 
 export function categoryLabel(id) {

@@ -5,12 +5,14 @@ import Badge, { DemoBadge } from './Badge.jsx';
 import Button from './Button.jsx';
 import { categoryLabel } from '../../services/engine/grammarRules.js';
 import { cn } from '../../utils/cn.js';
+import { normalizeHindi } from '../../utils/hindi.js';
 
 export function practiceLinkFor(m) {
   if (m.category === 'pronunciation') return m.sound ? `/pronunciation?sound=${m.sound}` : '/pronunciation';
   if (m.topic) return `/grammar/${m.topic}?mode=practice`;
   if (m.category === 'vocabulary') return '/vocabulary';
   if (m.category === 'pace') return '/speed';
+  if (m.category === 'hindi') return '/hindi';
   if (m.category === 'spelling' || m.category === 'punctuation') return '/writing';
   return '/grammar';
 }
@@ -26,6 +28,13 @@ export default function MistakeCard({ mistake, onMaster, onDelete, compact }) {
   const check = (e) => {
     e.preventDefault();
     if (!answer.trim()) return;
+    if (m.category === 'hindi') {
+      // Hindi answers look like "पानी (paani)": accept the Devanagari or the romanised form.
+      const typed = normalizeHindi(answer);
+      const [, hi, roman] = m.practice.answer.match(/^(.*?)\s*\((.*)\)$/) || [null, m.practice.answer, ''];
+      setChecked([hi, roman, m.practice.answer].some((a) => a && normalizeHindi(a) === typed));
+      return;
+    }
     const norm = (s) => s.toLowerCase().replace(/[^a-z' ]/g, '').replace(/\s+/g, ' ').trim();
     setChecked(norm(answer) === norm(m.practice.answer));
   };

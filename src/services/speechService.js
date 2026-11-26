@@ -49,6 +49,21 @@ export const speechService = {
   },
 
   /**
+   * Best voice for a non-English language such as 'hi-IN', or null when the
+   * device has none (the browser may still speak it with a fallback voice).
+   */
+  pickVoiceForLang(voices, lang) {
+    const base = lang.split(/[-_]/)[0].toLowerCase();
+    const matching = voices.filter((v) => v.lang && v.lang.replace('_', '-').toLowerCase().split('-')[0] === base && !NOVELTY_VOICES.test(v.name));
+    const preferred = LANG_VOICES[base] || [];
+    for (const name of preferred) {
+      const v = matching.find((voice) => voice.name.includes(name));
+      if (v) return v;
+    }
+    return matching.find((v) => v.lang.replace('_', '-').toLowerCase() === lang.toLowerCase()) || matching[0] || null;
+  },
+
+  /**
    * Best natural-sounding English voice of a gender, skipping novelty voices
    * and any voice in `exclude`. Falls back to any usable English voice.
    */
@@ -71,6 +86,10 @@ export const speechService = {
 // have them and fall through to their own built-in voices.
 const FEMALE_VOICES = ['Google US English', 'Google UK English Female', 'Samantha', 'Microsoft Aria', 'Microsoft Jenny', 'Microsoft Zira', 'Microsoft Neerja', 'Veena', 'Karen', 'Moira', 'Tessa', 'Google UK English Female', 'Serena', 'Victoria', 'Fiona', 'Microsoft Libby', 'Microsoft Sonia', 'Kathy', 'Shelley', 'Sandy', 'Flo'];
 const MALE_VOICES = ['Google UK English Male', 'Daniel', 'Rishi', 'Microsoft Guy', 'Microsoft David', 'Microsoft Mark', 'Microsoft Prabhat', 'Microsoft Ryan', 'Alex', 'Aaron', 'Arthur', 'Oliver', 'Fred', 'Reed', 'Eddy', 'Rocko', 'Ralph'];
+// Preferred voices per language, across Chrome, macOS/iOS, Windows and Android.
+const LANG_VOICES = {
+  hi: ['Google हिन्दी', 'Google Hindi', 'Lekha', 'Microsoft Swara', 'Microsoft Kalpana', 'Microsoft Madhur', 'Microsoft Hemant', 'Kiyara', 'Rishi'],
+};
 // macOS ships joke voices that are hard to understand — never use them for learning.
 const NOVELTY_VOICES = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Junior|Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Grandma|Grandpa)\b/i;
 

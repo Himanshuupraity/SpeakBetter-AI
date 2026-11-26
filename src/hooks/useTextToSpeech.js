@@ -43,20 +43,22 @@ export function useTextToSpeech() {
   }, [supported]);
 
   const speak = useCallback(
-    (text, { rate, onEnd } = {}) => {
+    (text, { rate, onEnd, lang } = {}) => {
       if (!supported || !text) {
         onEnd?.();
         return;
       }
       window.speechSynthesis.cancel();
       const token = ++tokenRef.current;
-      const voice = voices.find((v) => v.voiceURI === voiceURI) || speechService.pickDefaultVoice(voices);
+      // A non-English `lang` (e.g. 'hi-IN') uses a voice for that language instead of Emma's.
+      const foreign = lang && !/^en\b/i.test(lang);
+      const voice = foreign ? speechService.pickVoiceForLang(voices, lang) : voices.find((v) => v.voiceURI === voiceURI) || speechService.pickDefaultVoice(voices);
       const parts = splitSentences(text);
       setSpeaking(true);
       parts.forEach((part, i) => {
         const u = new SpeechSynthesisUtterance(part);
         if (voice) u.voice = voice;
-        u.lang = voice?.lang || 'en-US';
+        u.lang = voice?.lang || lang || 'en-US';
         u.rate = rate ?? speechRate ?? 1;
         u.pitch = 1;
         if (i === parts.length - 1) {

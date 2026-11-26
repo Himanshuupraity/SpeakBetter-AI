@@ -14,6 +14,7 @@ const DESCRIPTIONS = {
   '/writing': 'Emails, messages & bug reports',
   '/reading': 'Articles from A1 to C1',
   '/listening': 'Conversations & short talks',
+  '/hindi': 'हिंदी सीखें · Alphabet, words, phrases & grammar',
   '/mistakes': 'Review and fix your weak areas',
   '/history': 'All your past sessions',
 };

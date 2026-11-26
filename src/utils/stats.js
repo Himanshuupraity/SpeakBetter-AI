@@ -25,6 +25,7 @@ export const SESSION_TYPES = {
   pronunciation: { label: 'Pronunciation', route: '/pronunciation' },
   speed: { label: 'Speaking Speed', route: '/speed' },
   'level-test': { label: 'Level Test', route: '/level-test' },
+  hindi: { label: 'Learn Hindi', route: '/hindi' },
 };
 
 export function minutesOn(sessions, key) {

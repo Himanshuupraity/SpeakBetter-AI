@@ -19,6 +19,7 @@ const SOURCES = [
   { id: 'vocabulary', label: 'Vocabulary' },
   { id: 'pronunciation', label: 'Pronunciation' },
   { id: 'speed', label: 'Speaking speed' },
+  { id: 'hindi', label: 'Hindi' },
 ];
 
 export default function Mistakes() {

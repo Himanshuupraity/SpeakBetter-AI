@@ -26,6 +26,12 @@ const History = lazy(() => import('./pages/History.jsx'));
 const SessionDetail = lazy(() => import('./pages/SessionDetail.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const Learn = lazy(() => import('./pages/Learn.jsx'));
+const HindiHome = lazy(() => import('./pages/hindi/HindiHome.jsx'));
+const HindiAlphabet = lazy(() => import('./pages/hindi/HindiAlphabet.jsx'));
+const HindiWords = lazy(() => import('./pages/hindi/HindiWords.jsx'));
+const HindiPhrases = lazy(() => import('./pages/hindi/HindiPhrases.jsx'));
+const HindiGrammar = lazy(() => import('./pages/hindi/HindiGrammar.jsx'));
+const HindiQuiz = lazy(() => import('./pages/hindi/HindiQuiz.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
 function ScrollToTop() {
@@ -97,6 +103,13 @@ const router = createBrowserRouter(
         <Route path="history/:sessionId" element={<SessionDetail />} />
         <Route path="settings" element={<Settings />} />
         <Route path="learn" element={<Learn />} />
+        <Route path="hindi" element={<HindiHome />} />
+        <Route path="hindi/alphabet" element={<HindiAlphabet />} />
+        <Route path="hindi/words" element={<HindiWords />} />
+        <Route path="hindi/phrases" element={<HindiPhrases />} />
+        <Route path="hindi/grammar" element={<HindiGrammar />} />
+        <Route path="hindi/grammar/:lessonId" element={<HindiGrammar />} />
+        <Route path="hindi/quiz" element={<HindiQuiz />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Route>,
